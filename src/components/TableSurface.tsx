@@ -164,7 +164,7 @@ export function TableSurface({ surface }: TableSurfaceProps) {
           </mesh>
           {/* Subtle woven inset hem border */}
           <mesh
-            position={[0, 0.0355, 0]}
+            position={[0, 0.037, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
             receiveShadow
             raycast={noopRaycast}
@@ -175,6 +175,9 @@ export function TableSurface({ surface }: TableSurfaceProps) {
               roughness={0.9}
               transparent
               opacity={0.48}
+              polygonOffset
+              polygonOffsetFactor={-1}
+              polygonOffsetUnits={-1}
             />
           </mesh>
         </group>
@@ -197,13 +200,19 @@ export function TableSurface({ surface }: TableSurfaceProps) {
           </mesh>
           {/* Hanging leather/hole eyelet accent near peel handle end */}
           <mesh
-            position={[3.18, 0.062, 0]}
+            position={[3.18, 0.064, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
             receiveShadow
             raycast={noopRaycast}
           >
             <circleGeometry args={[0.075, 20]} />
-            <meshStandardMaterial color="#5E3C24" roughness={0.85} />
+            <meshStandardMaterial
+              color="#5E3C24"
+              roughness={0.85}
+              polygonOffset
+              polygonOffsetFactor={-1}
+              polygonOffsetUnits={-1}
+            />
           </mesh>
         </group>
       );
@@ -266,7 +275,7 @@ export function TableSurface({ surface }: TableSurfaceProps) {
           </mesh>
           {/* Hairline brushed warm-brass trivet inlay ring */}
           <mesh
-            position={[0, 0.061, 0]}
+            position={[0, 0.063, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
             receiveShadow
             raycast={noopRaycast}
@@ -276,6 +285,9 @@ export function TableSurface({ surface }: TableSurfaceProps) {
               color="#B8894A"
               roughness={0.36}
               metalness={0.78}
+              polygonOffset
+              polygonOffsetFactor={-1}
+              polygonOffsetUnits={-1}
             />
           </mesh>
         </group>

@@ -19,7 +19,6 @@ import {
 import {
   Bloom,
   EffectComposer,
-  N8AO,
   ToneMapping,
   Vignette,
 } from '@react-three/postprocessing';
@@ -152,7 +151,7 @@ function AtmosphereLights({ atmosphere }: AtmosphereLightsProps) {
         args={[atmosphere.ambientTint, '#A89480', 0.16]}
       />
 
-      {/* Sculptural 3/4 side-key with tight 2048px soft percentage shadows */}
+      {/* Sculptural 3/4 side-key with tight 2048px soft PCF shadows */}
       <directionalLight
         ref={keyLightRef}
         castShadow
@@ -160,9 +159,8 @@ function AtmosphereLights({ atmosphere }: AtmosphereLightsProps) {
         intensity={atmosphere.keyLightIntensity}
         color={atmosphere.keyLightColor}
         shadow-mapSize={[2048, 2048]}
-        shadow-radius={3}
-        shadow-bias={-0.00025}
-        shadow-normalBias={0.012}
+        shadow-bias={-0.0005}
+        shadow-normalBias={0.028}
         shadow-camera-near={1}
         shadow-camera-far={18}
         shadow-camera-left={-2.4}
@@ -486,7 +484,7 @@ export function SceneStage({
       />
 
       <Canvas
-        shadows="percentage"
+        shadows="soft"
         dpr={[1, 2]}
         camera={{ position: DEFAULT_CAMERA_POSITION, fov: 36 }}
         gl={{
@@ -518,7 +516,9 @@ export function SceneStage({
         />
 
         <ContactShadows
-          position={[0, -0.535, 0]}
+          key={`${dish.id}-${exploded ? 'e' : 'a'}`}
+          frames={32}
+          position={[0, -0.533, 0]}
           opacity={0.44}
           scale={6.4}
           blur={2.0}
@@ -536,12 +536,6 @@ export function SceneStage({
 
         <CanvasFeatureErrorBoundary onError={handlePostProcessingError}>
           <EffectComposer multisampling={4}>
-            <N8AO
-              aoRadius={0.28}
-              intensity={1.65}
-              distanceFalloff={0.8}
-              quality="medium"
-            />
             <Bloom luminanceThreshold={1.06} mipmapBlur intensity={0.22} />
             <Vignette darkness={0.26} offset={0.32} />
             <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />

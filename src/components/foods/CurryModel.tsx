@@ -249,7 +249,7 @@ export function CurryModel({
       amplitude: 0.042,
       frequency: 3.6,
       seed: 19,
-      flattenBottomY: -0.33,
+      flattenBottomY: -0.31,
       preserveSeam: true,
     });
 
@@ -260,11 +260,11 @@ export function CurryModel({
     return { riceMoundGeo: mound, riceGrainGeo: grain };
   }, []);
 
-  // Organic golden curry roux pool filling the right half & curving around the rice mound
+  // Organic golden curry roux pool cleanly nested inside the oval plate well (zero underside poke-through)
   const curryPoolGeo = useMemo(() => {
     const shape = new THREE.Shape();
-    const rx = 1.44;
-    const rz = 1.04;
+    const rx = 1.36;
+    const rz = 0.98;
     const steps = 32;
 
     const startAngle = Math.PI * 0.56;
@@ -278,21 +278,21 @@ export function CurryModel({
       else shape.lineTo(px, py);
     }
 
-    shape.bezierCurveTo(-0.36, -0.52, -0.22, 0.0, -0.28, 0.52);
+    shape.bezierCurveTo(-0.34, -0.48, -0.22, 0.0, -0.26, 0.48);
     shape.bezierCurveTo(
-      -0.3,
-      0.78,
-      -0.24,
-      0.94,
+      -0.28,
+      0.74,
+      -0.22,
+      0.9,
       Math.cos(startAngle) * rx,
       Math.sin(startAngle) * rz
     );
 
     const geo = new THREE.ExtrudeGeometry(shape, {
-      depth: 0.24,
+      depth: 0.14,
       bevelEnabled: true,
-      bevelThickness: 0.045,
-      bevelSize: 0.04,
+      bevelThickness: 0.032,
+      bevelSize: 0.035,
       bevelSegments: 5,
       curveSegments: 24,
     });
@@ -621,7 +621,7 @@ export function CurryModel({
         <group>
           <mesh
             geometry={curryPoolGeo}
-            position={[0, -0.31, 0]}
+            position={[0, -0.19, 0]}
             castShadow
             receiveShadow
           >

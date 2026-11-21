@@ -70,21 +70,21 @@ const SAUCE_GLAZE_SPOTS: [number, number, number, number][] = [
   [0.08, 0.135, 0.42, 0.075],
 ];
 
-// Glistening red oil droplets clinging around the inner clay bowl wall
+// Glistening red oil droplets clinging cleanly along the inner clay bowl wall above the sauce line
 const EDGE_DROPLETS: [number, number, number, number][] = [
-  [1.06, 0.11, 0.22, 0.036],
-  [0.92, 0.13, 0.56, 0.028],
-  [0.54, 0.115, 0.94, 0.034],
-  [-0.18, 0.125, 1.06, 0.03],
-  [-0.78, 0.11, 0.74, 0.036],
-  [-1.06, 0.12, 0.12, 0.032],
-  [-0.94, 0.115, -0.52, 0.035],
-  [-0.42, 0.13, -0.98, 0.028],
-  [0.26, 0.11, -1.04, 0.034],
-  [0.82, 0.125, -0.7, 0.03],
-  [1.02, 0.145, -0.34, 0.024],
-  [-0.64, 0.14, -0.84, 0.026],
-  [0.14, 0.14, 1.05, 0.025],
+  [1.11, 0.132, 0.22, 0.032],
+  [0.97, 0.145, 0.58, 0.026],
+  [0.56, 0.136, 0.99, 0.03],
+  [-0.19, 0.142, 1.12, 0.028],
+  [-0.81, 0.134, 0.78, 0.032],
+  [-1.12, 0.138, 0.13, 0.028],
+  [-0.99, 0.136, -0.55, 0.03],
+  [-0.44, 0.148, -1.04, 0.026],
+  [0.28, 0.134, -1.1, 0.03],
+  [0.86, 0.142, -0.74, 0.028],
+  [1.08, 0.156, -0.36, 0.024],
+  [-0.68, 0.152, -0.9, 0.024],
+  [0.15, 0.152, 1.12, 0.024],
 ];
 
 // Caramelized crispy minced pork crumbles tumbled over tofu & sauce
@@ -188,7 +188,7 @@ export function MapoTofuModel({
   const pankoTex = useMemo(() => getPankoCrustTextures(), []);
   const scallionNormal = useMemo(() => getOrganicNormalMap(811, 14, 1.2), []);
 
-  // Per-instance real PBR studio-reflecting chili oil + Food SSS materials (disposed on unmount)
+  // Per-instance opaque real PBR studio-reflecting chili oil + Food SSS materials (disposed on unmount)
   const sauceMat = useMemo(
     () =>
       createPbrBrothMaterial({
@@ -196,7 +196,7 @@ export function MapoTofuModel({
         oilColor: '#E63214',
         sheenColor: '#FFB070',
         isSpicy: true,
-        opacity: 0.96,
+        opacity: 1.0,
       }),
     []
   );
@@ -283,17 +283,17 @@ export function MapoTofuModel({
     return geo;
   }, []);
 
-  // Thick undulating crimson-mahogany doubanjiang chili oil sauce pool
+  // Thick undulating crimson-mahogany doubanjiang chili oil sauce pool (cleanly inset >=0.035 inside bowlGeo)
   const sauceGeo = useMemo(() => {
     const pts = [
-      new THREE.Vector2(0.0, -0.34),
-      new THREE.Vector2(0.66, -0.31),
-      new THREE.Vector2(0.9, -0.18),
-      new THREE.Vector2(1.06, -0.02),
-      new THREE.Vector2(1.14, 0.075),
-      new THREE.Vector2(0.84, 0.095),
-      new THREE.Vector2(0.42, 0.115),
-      new THREE.Vector2(0.0, 0.125),
+      new THREE.Vector2(0.0, -0.33),
+      new THREE.Vector2(0.62, -0.31),
+      new THREE.Vector2(0.86, -0.18),
+      new THREE.Vector2(1.02, -0.02),
+      new THREE.Vector2(1.095, 0.075),
+      new THREE.Vector2(0.82, 0.095),
+      new THREE.Vector2(0.42, 0.112),
+      new THREE.Vector2(0.0, 0.122),
     ];
     const geo = new THREE.LatheGeometry(pts, 56);
     const pos = geo.attributes.position;
@@ -301,8 +301,8 @@ export function MapoTofuModel({
       const x = pos.getX(i);
       const y = pos.getY(i);
       const z = pos.getZ(i);
-      if (y > 0.04) {
-        const wave = Math.sin(x * 4.5 + z * 3.2) * 0.014 + Math.cos(x * 3.1 - z * 4.8) * 0.01;
+      if (y > 0.08) {
+        const wave = Math.sin(x * 4.5 + z * 3.2) * 0.011 + Math.cos(x * 3.1 - z * 4.8) * 0.008;
         pos.setY(i, y + wave);
       }
     }
@@ -455,13 +455,19 @@ export function MapoTofuModel({
         <group>
           <mesh geometry={sauceGeo} material={sauceMat} receiveShadow />
 
-          {/* Glistening crimson oil meniscus hugging the dark stoneware inner wall */}
-          <mesh position={[0, 0.088, 0]} rotation={[Math.PI / 2, 0, 0]} scale={[1, 1, 1.4]}>
-            <torusGeometry args={[1.132, 0.015, 12, 64]} />
+          {/* Glistening crimson oil meniscus bridging sauce edge (1.095) cleanly to inner clay wall (1.139) */}
+          <mesh
+            position={[0, 0.092, 0]}
+            rotation={[Math.PI / 2, 0, 0]}
+            scale={[1, 1, 1.35]}
+            renderOrder={2}
+          >
+            <torusGeometry args={[1.116, 0.014, 12, 64]} />
             <meshPhysicalMaterial
               color="#CC2410"
               transparent
-              opacity={0.86}
+              opacity={0.84}
+              depthWrite={false}
               roughness={0.04}
               clearcoat={1}
               clearcoatRoughness={0.03}

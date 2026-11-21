@@ -88,14 +88,14 @@ const HERB_LEAVES: HerbLeafSpec[] = [
 ];
 
 const OIL_DROPLETS: [number, number, number, number][] = [
-  [0.78, 0.13, 0.28, 0.052],
-  [-0.74, 0.13, 0.42, 0.044],
-  [0.44, 0.13, -0.68, 0.048],
-  [-0.12, 0.13, 0.78, 0.042],
-  [0.86, 0.13, -0.14, 0.038],
-  [-0.68, 0.13, -0.52, 0.046],
-  [0.08, 0.13, -0.78, 0.04],
-  [-0.86, 0.13, 0.04, 0.044],
+  [0.78, 0.132, 0.28, 0.052],
+  [-0.74, 0.132, 0.42, 0.044],
+  [0.44, 0.132, -0.68, 0.048],
+  [-0.12, 0.132, 0.78, 0.042],
+  [0.86, 0.132, -0.14, 0.038],
+  [-0.68, 0.132, -0.52, 0.046],
+  [0.08, 0.132, -0.78, 0.04],
+  [-0.86, 0.132, 0.04, 0.044],
 ];
 
 function createSeededRand(seed: number): () => number {
@@ -113,7 +113,6 @@ export function PhoModel({
   highlightedPart,
   onSelectPart,
 }: FoodModelProps) {
-  const brothGroupRef = useRef<THREE.Group>(null);
   const floatGarnishRef = useRef<THREE.Group>(null);
   const starAniseRef = useRef<THREE.Group>(null);
 
@@ -267,16 +266,16 @@ export function PhoModel({
     return { outerBowlGeo: outer, innerBowlGeo: inner };
   }, []);
 
-  // Rich amber beef broth body matching the bowl interior
+  // Rich amber beef broth body cleanly inset >=0.035 inside innerBowlGeo (zero ceramic wall z-fighting)
   const brothGeo = useMemo(() => {
     const pts = [
-      new THREE.Vector2(0.0, -0.4),
-      new THREE.Vector2(0.44, -0.39),
-      new THREE.Vector2(0.72, -0.31),
-      new THREE.Vector2(0.94, -0.16),
-      new THREE.Vector2(1.1, 0.02),
-      new THREE.Vector2(1.17, 0.12),
-      new THREE.Vector2(0.0, 0.12),
+      new THREE.Vector2(0.0, -0.39),
+      new THREE.Vector2(0.43, -0.38),
+      new THREE.Vector2(0.7, -0.3),
+      new THREE.Vector2(0.91, -0.16),
+      new THREE.Vector2(1.07, 0.02),
+      new THREE.Vector2(1.145, 0.118),
+      new THREE.Vector2(0.0, 0.118),
     ];
     const geo = new THREE.LatheGeometry(pts, 60);
     geo.computeVertexNormals();
@@ -379,9 +378,9 @@ export function PhoModel({
     });
 
     const inner = new THREE.ExtrudeGeometry(innerShape, {
-      depth: 0.032,
+      depth: 0.03,
       bevelEnabled: true,
-      bevelThickness: 0.008,
+      bevelThickness: 0.006,
       bevelSize: 0.008,
       bevelSegments: 2,
       curveSegments: 16,
@@ -392,10 +391,10 @@ export function PhoModel({
       const x = iPos.getX(i);
       const y = iPos.getY(i);
       const z = iPos.getZ(i);
-      iPos.setY(i, y + Math.sin(x * 7.5 + z * 3.0) * 0.032 + 0.004);
+      iPos.setY(i, y + Math.sin(x * 7.5 + z * 3.0) * 0.032 + 0.009);
     }
     displaceGeometryOrganic(inner, {
-      amplitude: 0.009,
+      amplitude: 0.008,
       frequency: 9.0,
       seed: 409,
       preserveSeam: true,
@@ -534,9 +533,6 @@ export function PhoModel({
     const t = state.clock.elapsedTime;
     updateBrothMaterial(brothMat, t, isBrothHi);
 
-    if (brothGroupRef.current) {
-      brothGroupRef.current.position.y = Math.sin(t * 1.4) * 0.004;
-    }
     if (floatGarnishRef.current) {
       floatGarnishRef.current.position.y = Math.sin(t * 1.6 + 0.5) * 0.008;
     }
@@ -624,20 +620,22 @@ export function PhoModel({
         highlighted={isBrothHi}
         onSelect={handleSelect}
       >
-        <group ref={brothGroupRef}>
-          <mesh geometry={brothGeo} material={brothMat} receiveShadow />
+        <group>
+          <mesh geometry={brothGeo} material={brothMat} receiveShadow renderOrder={1} />
 
-          {/* Delicate glistening capillary meniscus ring hugging the inner bowl wall */}
+          {/* Delicate glistening capillary meniscus ring bridging broth edge (1.145) to inner bowl wall (1.187) */}
           <mesh
-            position={[0, 0.128, 0]}
+            position={[0, 0.124, 0]}
             rotation={[Math.PI / 2, 0, 0]}
-            scale={[1, 1, 1.45]}
+            scale={[1, 1, 1.35]}
+            renderOrder={2}
           >
-            <torusGeometry args={[1.158, 0.015, 12, 72]} />
+            <torusGeometry args={[1.158, 0.014, 12, 72]} />
             <meshPhysicalMaterial
               color="#B46820"
               transparent
-              opacity={0.78}
+              opacity={0.76}
+              depthWrite={false}
               roughness={0.04}
               clearcoat={1}
               clearcoatRoughness={0.03}
@@ -647,14 +645,21 @@ export function PhoModel({
             />
           </mesh>
 
-          {/* Physical golden marrow oil pearls catching crisp softbox highlights */}
+          {/* Physical golden marrow oil pearls cleanly above broth surface (zero transparent z-fighting) */}
           {OIL_DROPLETS.map(([x, y, z, r], idx) => (
-            <mesh key={`oil-${idx}`} position={[x, y, z]} scale={[1, 0.14, 1]} receiveShadow>
+            <mesh
+              key={`oil-${idx}`}
+              position={[x, y, z]}
+              scale={[1, 0.14, 1]}
+              receiveShadow
+              renderOrder={2}
+            >
               <sphereGeometry args={[r, 12, 10]} />
               <meshPhysicalMaterial
                 color="#D99A2E"
                 transparent
-                opacity={0.74}
+                opacity={0.72}
+                depthWrite={false}
                 roughness={0.04}
                 clearcoat={1}
                 clearcoatRoughness={0.03}

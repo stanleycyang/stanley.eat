@@ -971,8 +971,11 @@ export function createPbrBrothMaterial(options: BrothShaderOptions): AnimatedBro
     ior: 1.38,
     transparent,
     opacity,
-    depthWrite: opacity >= 0.95,
-    side: THREE.DoubleSide,
+    depthWrite: !transparent,
+    side: THREE.FrontSide,
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
   }) as AnimatedBrothMaterial;
 
   material.userData = {
@@ -981,7 +984,7 @@ export function createPbrBrothMaterial(options: BrothShaderOptions): AnimatedBro
   };
 
   material.customProgramCacheKey = () =>
-    `pbr-broth-v3-${isSpicy ? 'spicy' : 'mild'}-${transparent ? 'trans' : 'opaque'}`;
+    `pbr-broth-v3b-${isSpicy ? 'spicy' : 'mild'}-${transparent ? 'trans' : 'opaque'}`;
 
   material.onBeforeCompile = (shader) => {
     shader.uniforms.uTime = uTime;
@@ -991,7 +994,7 @@ export function createPbrBrothMaterial(options: BrothShaderOptions): AnimatedBro
     shader.uniforms.uBrothSheenColor = uBrothSheenColor;
     shader.uniforms.uIsSpicy = uIsSpicy;
 
-    // --- Vertex Shader: world-XZ simmering displacement + vBrothWorldPos ---
+    // --- Vertex Shader: gentle top-surface-only +Y simmering ripple + vBrothWorldPos ---
     shader.vertexShader = shader.vertexShader
       .replace(
         '#include <common>',
@@ -1009,12 +1012,13 @@ export function createPbrBrothMaterial(options: BrothShaderOptions): AnimatedBro
         vec4 brothBaseWorld = modelMatrix * vec4( transformed, 1.0 );
         float brothRadial = length( brothBaseWorld.xz );
         float brothEdgeDamp = 1.0 - smoothstep( 0.65, 1.35, brothRadial );
+        float brothTopMask = smoothstep( 0.45, 0.85, objectNormal.y );
         float brothSpeed = mix( 1.35, 2.2, uIsSpicy );
-        float brothAmp = mix( 0.0038, 0.0068, uIsSpicy ) * brothEdgeDamp;
+        float brothAmp = mix( 0.0022, 0.0038, uIsSpicy ) * brothEdgeDamp;
         float brothWave = sin( brothBaseWorld.x * 7.5 + uTime * brothSpeed )
                         * cos( brothBaseWorld.z * 6.8 - uTime * brothSpeed * 0.85 )
                         + sin( ( brothBaseWorld.x - brothBaseWorld.z ) * 11.0 - uTime * brothSpeed * 1.35 ) * 0.5;
-        transformed += objectNormal * ( brothWave * brothAmp );
+        transformed.y += brothWave * brothAmp * brothTopMask;
         vBrothWorldPos = ( modelMatrix * vec4( transformed, 1.0 ) ).xyz;
         `
       );

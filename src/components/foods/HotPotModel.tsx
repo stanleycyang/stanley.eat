@@ -141,7 +141,7 @@ export function HotPotModel({
   const gripSlateTex = useMemo(() => getSlateTextures(), []);
   const organicNormal = useMemo(() => getOrganicNormalMap(547, 12, 1.7), []);
 
-  // Per-instance real PBR studio-reflecting broths + Food SSS materials (disposed on unmount)
+  // Per-instance opaque real PBR studio-reflecting broths + Food SSS materials (disposed on unmount)
   const malaBrothMat = useMemo(
     () =>
       createPbrBrothMaterial({
@@ -149,7 +149,7 @@ export function HotPotModel({
         oilColor: '#E83414',
         sheenColor: '#FFB070',
         isSpicy: true,
-        opacity: 0.96,
+        opacity: 1.0,
       }),
     []
   );
@@ -161,7 +161,7 @@ export function HotPotModel({
         oilColor: '#FFF3D6',
         sheenColor: '#FFFDF6',
         isSpicy: false,
-        opacity: 0.95,
+        opacity: 1.0,
       }),
     []
   );
@@ -301,12 +301,28 @@ export function HotPotModel({
     return { potGeo: pot, dividerGeo: divider, handleGeo: handle };
   }, []);
 
-  // Matching Left (Mala) & Right (Bone) S-curve broth volumes + capillary meniscus rims
+  // Matching Left (Mala) & Right (Bone) S-curve broth volumes cleanly inset inside pot wall & divider
   const { malaBrothGeo, boneBrothGeo, malaMeniscusGeo, boneMeniscusGeo } = useMemo(() => {
-    const R = 1.19;
-    const gap = 0.032;
+    const R = 1.165;
+    const gap = 0.042;
     const arcSteps = 32;
     const sSamples = sampleSCurvePoints(R, 26);
+
+    // Taper lower extruded vertices slightly inward so the bottom never pokes through the curved pot belly
+    const taperLowerPotFit = (geo: THREE.BufferGeometry) => {
+      const pos = geo.attributes.position;
+      for (let i = 0; i < pos.count; i++) {
+        const y = pos.getY(i);
+        if (y < -0.02) {
+          const t = THREE.MathUtils.clamp((-0.02 - y) / 0.16, 0, 1);
+          const shrink = 1 - t * 0.06;
+          pos.setX(i, pos.getX(i) * shrink);
+          pos.setZ(i, pos.getZ(i) * shrink);
+        }
+      }
+      pos.needsUpdate = true;
+      geo.computeVertexNormals();
+    };
 
     const malaShape = new THREE.Shape();
     for (let i = 0; i <= arcSteps; i++) {
@@ -324,15 +340,15 @@ export function HotPotModel({
     malaShape.closePath();
 
     const malaGeo = new THREE.ExtrudeGeometry(malaShape, {
-      depth: 0.44,
+      depth: 0.24,
       bevelEnabled: true,
-      bevelThickness: 0.015,
-      bevelSize: 0.012,
+      bevelThickness: 0.014,
+      bevelSize: 0.01,
       bevelSegments: 3,
     });
     malaGeo.rotateX(-Math.PI / 2);
-    malaGeo.translate(0, -0.34, 0);
-    malaGeo.computeVertexNormals();
+    malaGeo.translate(0, -0.15, 0);
+    taperLowerPotFit(malaGeo);
 
     const boneShape = new THREE.Shape();
     for (let i = 0; i <= arcSteps; i++) {
@@ -350,34 +366,34 @@ export function HotPotModel({
     boneShape.closePath();
 
     const boneGeo = new THREE.ExtrudeGeometry(boneShape, {
-      depth: 0.44,
+      depth: 0.24,
       bevelEnabled: true,
-      bevelThickness: 0.015,
-      bevelSize: 0.012,
+      bevelThickness: 0.014,
+      bevelSize: 0.01,
       bevelSegments: 3,
     });
     boneGeo.rotateX(-Math.PI / 2);
-    boneGeo.translate(0, -0.34, 0);
-    boneGeo.computeVertexNormals();
+    boneGeo.translate(0, -0.15, 0);
+    taperLowerPotFit(boneGeo);
 
-    // Closed capillary meniscus tubes hugging BOTH the outer pot wall & S-curve divider
-    const meniscusY = 0.118;
+    // Closed capillary meniscus tubes cleanly above broth surface (y = 0.104 -> meniscus y = 0.114)
+    const meniscusY = 0.114;
     const malaLoopPts: THREE.Vector3[] = [];
     for (let i = 0; i <= 24; i++) {
       const a = Math.PI / 2 + (i / 24) * Math.PI;
-      malaLoopPts.push(new THREE.Vector3(Math.cos(a) * 1.195, meniscusY, -Math.sin(a) * 1.195));
+      malaLoopPts.push(new THREE.Vector3(Math.cos(a) * 1.185, meniscusY, -Math.sin(a) * 1.185));
     }
     for (let i = sSamples.length - 2; i >= 1; i--) {
       const s = sSamples[i];
       const edgeTaper = Math.sin((i / (sSamples.length - 1)) * Math.PI);
       malaLoopPts.push(
-        new THREE.Vector3(s.x + s.nx * 0.036 * edgeTaper, meniscusY, -(s.y + s.ny * 0.036 * edgeTaper))
+        new THREE.Vector3(s.x + s.nx * 0.044 * edgeTaper, meniscusY, -(s.y + s.ny * 0.044 * edgeTaper))
       );
     }
     const malaMeniscus = new THREE.TubeGeometry(
       new THREE.CatmullRomCurve3(malaLoopPts, true),
       84,
-      0.014,
+      0.013,
       8,
       true
     );
@@ -385,19 +401,19 @@ export function HotPotModel({
     const boneLoopPts: THREE.Vector3[] = [];
     for (let i = 0; i <= 24; i++) {
       const a = -Math.PI / 2 + (i / 24) * Math.PI;
-      boneLoopPts.push(new THREE.Vector3(Math.cos(a) * 1.195, meniscusY, -Math.sin(a) * 1.195));
+      boneLoopPts.push(new THREE.Vector3(Math.cos(a) * 1.185, meniscusY, -Math.sin(a) * 1.185));
     }
     for (let i = 1; i < sSamples.length - 1; i++) {
       const s = sSamples[i];
       const edgeTaper = Math.sin((i / (sSamples.length - 1)) * Math.PI);
       boneLoopPts.push(
-        new THREE.Vector3(s.x - s.nx * 0.036 * edgeTaper, meniscusY, -(s.y - s.ny * 0.036 * edgeTaper))
+        new THREE.Vector3(s.x - s.nx * 0.044 * edgeTaper, meniscusY, -(s.y - s.ny * 0.044 * edgeTaper))
       );
     }
     const boneMeniscus = new THREE.TubeGeometry(
       new THREE.CatmullRomCurve3(boneLoopPts, true),
       84,
-      0.014,
+      0.013,
       8,
       true
     );
@@ -638,7 +654,7 @@ export function HotPotModel({
       const cycle = (t * b.speed * 0.45 + b.phase) % 1;
       const scale = Math.sin(cycle * Math.PI) * 1.15 + 0.12;
       mesh.scale.set(scale, scale * 0.55, scale);
-      mesh.position.y = 0.115 + Math.sin(cycle * Math.PI) * 0.016;
+      mesh.position.y = 0.114 + Math.sin(cycle * Math.PI) * 0.016;
     });
 
     BONE_BUBBLES.forEach((b, i) => {
@@ -647,7 +663,7 @@ export function HotPotModel({
       const cycle = (t * b.speed * 0.42 + b.phase) % 1;
       const scale = Math.sin(cycle * Math.PI) * 1.05 + 0.15;
       mesh.scale.set(scale, scale * 0.5, scale);
-      mesh.position.y = 0.115 + Math.sin(cycle * Math.PI) * 0.013;
+      mesh.position.y = 0.114 + Math.sin(cycle * Math.PI) * 0.013;
     });
 
     CHILI_PODS.forEach((c, i) => {
@@ -781,11 +797,12 @@ export function HotPotModel({
           <mesh geometry={malaBrothGeo} material={malaBrothMat} receiveShadow />
 
           {/* Glistening crimson chili-oil meniscus hugging the steel wall & S-curve divider */}
-          <mesh geometry={malaMeniscusGeo}>
+          <mesh geometry={malaMeniscusGeo} renderOrder={2}>
             <meshPhysicalMaterial
               color="#D42812"
               transparent
               opacity={0.86}
+              depthWrite={false}
               roughness={0.04}
               clearcoat={1}
               clearcoatRoughness={0.03}
@@ -800,8 +817,9 @@ export function HotPotModel({
               ref={(el) => {
                 malaBubbleRefs.current[idx] = el;
               }}
-              position={[b.x, 0.115, b.z]}
+              position={[b.x, 0.114, b.z]}
               receiveShadow
+              renderOrder={2}
             >
               <sphereGeometry args={[b.baseR, 14, 10]} />
               <meshPhysicalMaterial
@@ -811,6 +829,7 @@ export function HotPotModel({
                 clearcoatRoughness={0.03}
                 transparent
                 opacity={0.88}
+                depthWrite={false}
                 emissive="#B8250A"
                 emissiveIntensity={isMalaHi ? 0.4 : 0.1}
               />
@@ -833,11 +852,12 @@ export function HotPotModel({
           <mesh geometry={boneBrothGeo} material={boneBrothMat} receiveShadow />
 
           {/* Delicate ivory-cream meniscus hugging the steel wall & S-curve divider */}
-          <mesh geometry={boneMeniscusGeo}>
+          <mesh geometry={boneMeniscusGeo} renderOrder={2}>
             <meshPhysicalMaterial
               color="#FAF1DE"
               transparent
               opacity={0.82}
+              depthWrite={false}
               roughness={0.06}
               clearcoat={1}
               clearcoatRoughness={0.05}
@@ -852,8 +872,9 @@ export function HotPotModel({
               ref={(el) => {
                 boneBubbleRefs.current[idx] = el;
               }}
-              position={[b.x, 0.115, b.z]}
+              position={[b.x, 0.114, b.z]}
               receiveShadow
+              renderOrder={2}
             >
               <sphereGeometry args={[b.baseR, 12, 10]} />
               <meshPhysicalMaterial
@@ -862,6 +883,7 @@ export function HotPotModel({
                 clearcoat={0.9}
                 transparent
                 opacity={0.86}
+                depthWrite={false}
                 emissive="#7A5F36"
                 emissiveIntensity={isBoneHi ? 0.24 : 0}
               />
