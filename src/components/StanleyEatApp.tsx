@@ -8,6 +8,8 @@ import { SceneStageLoader } from './SceneStageLoader';
 import { RecipePanel, type ScaleFactor } from './RecipePanel';
 import { DishDock } from './DishDock';
 import { CookModeModal } from './CookModeModal';
+import { TastingMenuModal } from './TastingMenuModal';
+import { AboutStanleyModal } from './AboutStanleyModal';
 
 function fallbackCopyText(text: string): boolean {
   try {
@@ -27,19 +29,36 @@ function fallbackCopyText(text: string): boolean {
   }
 }
 
+function computeShortestDirection(
+  fromIndex: number,
+  toIndex: number,
+  total: number
+): 1 | -1 {
+  if (fromIndex === toIndex || total <= 1) return 1;
+  const forward = (toIndex - fromIndex + total) % total;
+  const backward = (fromIndex - toIndex + total) % total;
+  return forward <= backward ? 1 : -1;
+}
+
 export function StanleyEatApp() {
   const searchParams = useSearchParams();
   const initialDish = getDishById(searchParams.get('dish'));
 
   const [activeDishId, setActiveDishId] = useState<DishId>(initialDish.id);
+  const [transitionDirection, setTransitionDirection] = useState<1 | -1>(1);
   const [exploded, setExploded] = useState(false);
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
   const [hoveredPart, setHoveredPart] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
-  const [cookModeOpen, setCookModeOpen] = useState(false);
 
-  // Lifted per-dish recipe progress so RecipePanel and CookModeModal stay in sync
-  const [scaleByDish, setScaleByDish] = useState<Partial<Record<DishId, ScaleFactor>>>({});
+  const [cookModeOpen, setCookModeOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [aboutOpen, setAboutOpen] = useState(false);
+
+  // Lifted per-dish recipe progress so RecipePanel, CookModeModal, DishDock & TastingMenuModal stay in sync
+  const [scaleByDish, setScaleByDish] = useState<
+    Partial<Record<DishId, ScaleFactor>>
+  >({});
   const [checkedByDish, setCheckedByDish] = useState<
     Partial<Record<DishId, Record<string, boolean>>>
   >({});
@@ -53,6 +72,11 @@ export function StanleyEatApp() {
   }, [activeDishId]);
 
   const activeDish = RECIPES[activeDishIndex] ?? RECIPES[0];
+  const prevDish =
+    RECIPES[(activeDishIndex - 1 + RECIPES.length) % RECIPES.length] ??
+    activeDish;
+  const nextDish =
+    RECIPES[(activeDishIndex + 1) % RECIPES.length] ?? activeDish;
   const highlightedPart = hoveredPart ?? selectedPart;
 
   const activeScale: ScaleFactor = scaleByDish[activeDish.id] ?? 1;
@@ -60,6 +84,22 @@ export function StanleyEatApp() {
     () => checkedByDish[activeDish.id] ?? {},
     [checkedByDish, activeDish.id]
   );
+
+  const checkedCountsByDish = useMemo(() => {
+    const counts: Partial<Record<DishId, number>> = {};
+    for (const recipe of RECIPES) {
+      const map = checkedByDish[recipe.id];
+      if (!map) continue;
+      let count = 0;
+      for (const ing of recipe.ingredients) {
+        if (map[ing.id]) count += 1;
+      }
+      if (count > 0) {
+        counts[recipe.id] = count;
+      }
+    }
+    return counts;
+  }, [checkedByDish]);
 
   // Sync if the URL query param changes externally (e.g., browser navigation)
   useEffect(() => {
@@ -79,22 +119,41 @@ export function StanleyEatApp() {
     };
   }, []);
 
-  const handleSelectDish = useCallback((nextId: DishId) => {
-    setActiveDishId(nextId);
-    setExploded(false);
-    setSelectedPart(null);
-    setHoveredPart(null);
+  const handleSelectDish = useCallback(
+    (nextId: DishId, explicitDirection?: 1 | -1) => {
+      if (nextId === activeDishId) return;
 
-    if (typeof window !== 'undefined') {
-      const url = new URL(window.location.href);
-      url.searchParams.set('dish', nextId);
-      window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
-    }
+      const targetIndex = RECIPES.findIndex((item) => item.id === nextId);
+      const direction =
+        explicitDirection ??
+        computeShortestDirection(
+          activeDishIndex,
+          targetIndex >= 0 ? targetIndex : 0,
+          RECIPES.length
+        );
 
-    if (recipeScrollRef.current) {
-      recipeScrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
-    }
-  }, []);
+      setTransitionDirection(direction);
+      setActiveDishId(nextId);
+      setExploded(false);
+      setSelectedPart(null);
+      setHoveredPart(null);
+
+      if (typeof window !== 'undefined') {
+        const url = new URL(window.location.href);
+        url.searchParams.set('dish', nextId);
+        window.history.replaceState(
+          null,
+          '',
+          `${url.pathname}${url.search}${url.hash}`
+        );
+      }
+
+      if (recipeScrollRef.current) {
+        recipeScrollRef.current.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    },
+    [activeDishId, activeDishIndex]
+  );
 
   const handleToggleExplode = useCallback(() => {
     setExploded((prev) => !prev);
@@ -145,7 +204,10 @@ export function StanleyEatApp() {
     const shareUrl = `${window.location.origin}${window.location.pathname}?dish=${activeDish.id}`;
 
     let copied = false;
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    if (
+      navigator.clipboard &&
+      typeof navigator.clipboard.writeText === 'function'
+    ) {
       try {
         await navigator.clipboard.writeText(shareUrl);
         copied = true;
@@ -168,6 +230,8 @@ export function StanleyEatApp() {
   }, [activeDish.id]);
 
   const handleOpenCookMode = useCallback(() => {
+    setMenuOpen(false);
+    setAboutOpen(false);
     setCookModeOpen(true);
   }, []);
 
@@ -175,9 +239,31 @@ export function StanleyEatApp() {
     setCookModeOpen(false);
   }, []);
 
-  // Keyboard shortcuts (paused while CookModeModal is open so Cook Mode owns navigation)
+  const handleOpenMenu = useCallback(() => {
+    setCookModeOpen(false);
+    setAboutOpen(false);
+    setMenuOpen(true);
+  }, []);
+
+  const handleCloseMenu = useCallback(() => {
+    setMenuOpen(false);
+  }, []);
+
+  const handleOpenAbout = useCallback(() => {
+    setCookModeOpen(false);
+    setMenuOpen(false);
+    setAboutOpen(true);
+  }, []);
+
+  const handleCloseAbout = useCallback(() => {
+    setAboutOpen(false);
+  }, []);
+
+  const anyModalOpen = cookModeOpen || menuOpen || aboutOpen;
+
+  // Global keyboard shortcuts (paused whenever any modal is open)
   useEffect(() => {
-    if (cookModeOpen) return;
+    if (anyModalOpen) return;
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
@@ -196,17 +282,24 @@ export function StanleyEatApp() {
       if (event.key === 'ArrowRight') {
         event.preventDefault();
         const nextIndex = (activeDishIndex + 1) % RECIPES.length;
-        handleSelectDish(RECIPES[nextIndex].id);
+        handleSelectDish(RECIPES[nextIndex].id, 1);
       } else if (event.key === 'ArrowLeft') {
         event.preventDefault();
-        const prevIndex = (activeDishIndex - 1 + RECIPES.length) % RECIPES.length;
-        handleSelectDish(RECIPES[prevIndex].id);
+        const prevIndex =
+          (activeDishIndex - 1 + RECIPES.length) % RECIPES.length;
+        handleSelectDish(RECIPES[prevIndex].id, -1);
       } else if (event.key === 'e' || event.key === 'E') {
         event.preventDefault();
         handleToggleExplode();
       } else if (event.key === 'c' || event.key === 'C') {
         event.preventDefault();
         setCookModeOpen(true);
+      } else if (event.key === 'm' || event.key === 'M') {
+        event.preventDefault();
+        setMenuOpen(true);
+      } else if (event.key === 'i' || event.key === 'I') {
+        event.preventDefault();
+        setAboutOpen(true);
       } else if (event.key === 'Escape') {
         setSelectedPart(null);
         setHoveredPart(null);
@@ -215,11 +308,7 @@ export function StanleyEatApp() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [cookModeOpen, activeDishIndex, handleSelectDish, handleToggleExplode]);
-
-  const dishCounter = `${String(activeDishIndex + 1).padStart(2, '0')} / ${String(
-    RECIPES.length
-  ).padStart(2, '0')}`;
+  }, [anyModalOpen, activeDishIndex, handleSelectDish, handleToggleExplode]);
 
   return (
     <div className="min-h-screen w-full bg-[#FAF7F2] text-[#1C1917] lg:flex lg:h-screen lg:overflow-hidden">
@@ -236,38 +325,60 @@ export function StanleyEatApp() {
             onToggleExplode={handleToggleExplode}
             highlightedPart={highlightedPart}
             focusedPart={selectedPart}
+            transitionDirection={transitionDirection}
             onSelectPart={handleSelectPart}
           />
         </div>
 
-        {/* Floating Editorial Brand Masthead (top-left, cleanly aligned above SceneStage HUD) */}
-        <header className="pointer-events-none absolute top-3.5 left-4 z-20 flex items-center gap-2.5 sm:top-4 sm:left-6">
-          <button
-            type="button"
-            onClick={() => handleSelectDish(RECIPES[0].id)}
-            aria-label="stanley.eat — return to first dish"
-            className="pointer-events-auto inline-flex items-baseline gap-2 rounded-full border border-[#E6DDD0]/85 bg-[#FFFDF9]/85 px-3.5 py-1.5 backdrop-blur-md shadow-[0_4px_16px_-6px_rgba(28,25,23,0.12)] transition-all hover:bg-[#FFFDF9] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
-          >
-            <span className="font-serif text-[19px] sm:text-[22px] font-semibold leading-none tracking-[-0.03em] text-[#1C1917]">
-              stanley<span className="text-[#D9381E]">.eat</span>
-            </span>
-            <span className="hidden sm:inline-block font-mono text-[10.5px] font-medium tracking-[0.04em] text-[#786E63]">
-              {dishCounter}
-            </span>
-          </button>
+        {/* Upgraded Top-Left Editorial Brand Masthead */}
+        <header className="pointer-events-none absolute top-3.5 left-3 z-20 flex flex-col items-start sm:top-5 sm:left-6">
+          <div className="flex items-center gap-1.5 sm:gap-2">
+            <button
+              type="button"
+              onClick={handleOpenMenu}
+              aria-label="stanley.eat — open 7-course tasting menu"
+              className="pointer-events-auto inline-flex items-baseline rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/88 px-3 py-1.5 backdrop-blur-md shadow-[0_6px_18px_-8px_rgba(28,25,23,0.14)] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] sm:px-3.5"
+            >
+              <span className="font-serif text-[17px] sm:text-[21px] font-semibold leading-none tracking-[-0.03em] text-[#1C1917]">
+                stanley<span className="text-[#D9381E]">.eat</span>
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleOpenAbout}
+              title="About Stanley Yang"
+              aria-label="About Stanley Yang and this vault"
+              className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/84 p-1 text-[11.5px] font-medium text-[#443E37] backdrop-blur-md shadow-[0_6px_18px_-8px_rgba(28,25,23,0.12)] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] hover:text-[#1C1917] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] sm:py-1 sm:pr-3 sm:pl-1.5"
+            >
+              <span
+                aria-hidden="true"
+                className="flex h-5 w-5 items-center justify-center rounded-full bg-[#EFE8DC] font-serif text-[10px] font-semibold text-[#D9381E]"
+              >
+                SY
+              </span>
+              <span className="hidden sm:inline">by Stanley Yang</span>
+            </button>
+          </div>
+
+          <p className="mt-1.5 hidden pl-1 text-[11.5px] font-medium tracking-[0.01em] text-[#6B6258]/90 sm:block">
+            My 7 favorite dishes — in 3D &amp; in the kitchen.
+          </p>
         </header>
 
-        {/* Desktop Floating Bottom Dish-Switcher Dock */}
+        {/* Desktop Floating Bottom Tasting Counter Stepper */}
         <div className="pointer-events-none absolute inset-x-0 bottom-5 z-20 hidden flex-col items-center gap-2 px-5 lg:flex">
-          <div className="pointer-events-auto max-w-full">
+          <div className="pointer-events-auto">
             <DishDock
               dishes={RECIPES}
               activeDishId={activeDish.id}
               onSelectDish={handleSelectDish}
+              onOpenMenu={handleOpenMenu}
+              checkedCountsByDish={checkedCountsByDish}
             />
           </div>
           <p className="hidden xl:block font-mono text-[10.5px] tracking-[0.04em] text-[#8A7E71]/90">
-            ← → Switch Dish · E Explode · C Cook Mode · Click Layer to Focus
+            ← → Switch · M Menu · E Explode · C Cook · I About
           </p>
         </div>
       </section>
@@ -280,9 +391,14 @@ export function StanleyEatApp() {
       >
         <RecipePanel
           dish={activeDish}
+          nextDish={nextDish}
+          prevDish={prevDish}
+          activeDishIndex={activeDishIndex}
+          totalDishes={RECIPES.length}
           highlightedPart={highlightedPart}
           onHoverPart={setHoveredPart}
           onSelectPart={handleSelectPart}
+          onSelectDish={handleSelectDish}
           onShare={handleShare}
           shareCopied={shareCopied}
           scale={activeScale}
@@ -291,19 +407,44 @@ export function StanleyEatApp() {
           onToggleIngredient={handleToggleIngredient}
           onResetChecked={handleResetChecked}
           onOpenCookMode={handleOpenCookMode}
+          onOpenMenu={handleOpenMenu}
+          onOpenAbout={handleOpenAbout}
         />
       </main>
 
-      {/* Mobile Fixed Bottom Dish-Switcher Dock */}
+      {/* Mobile Fixed Bottom Tasting Counter Stepper */}
       <div className="pointer-events-none fixed inset-x-0 bottom-0 z-30 flex justify-center px-3 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] lg:hidden">
-        <div className="pointer-events-auto max-w-full">
+        <div className="pointer-events-auto flex w-full justify-center">
           <DishDock
             dishes={RECIPES}
             activeDishId={activeDish.id}
             onSelectDish={handleSelectDish}
+            onOpenMenu={handleOpenMenu}
+            checkedCountsByDish={checkedCountsByDish}
           />
         </div>
       </div>
+
+      {/* 7-Course Tasting Menu Overlay */}
+      <TastingMenuModal
+        dishes={RECIPES}
+        activeDishId={activeDish.id}
+        isOpen={menuOpen}
+        onClose={handleCloseMenu}
+        onSelectDish={handleSelectDish}
+        onOpenAbout={handleOpenAbout}
+        checkedCountsByDish={checkedCountsByDish}
+      />
+
+      {/* Boutique Cookbook Dust-Jacket "About Stanley" Modal */}
+      <AboutStanleyModal
+        dishes={RECIPES}
+        activeDishId={activeDish.id}
+        isOpen={aboutOpen}
+        onClose={handleCloseAbout}
+        onSelectDish={handleSelectDish}
+        onOpenMenu={handleOpenMenu}
+      />
 
       {/* Hands-Free Kitchen Counter Cook Mode Overlay */}
       <CookModeModal

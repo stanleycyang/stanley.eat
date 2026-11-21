@@ -43,6 +43,7 @@ export interface SceneStageProps {
   onToggleExplode: () => void;
   highlightedPart: string | null;
   focusedPart?: string | null;
+  transitionDirection?: 1 | -1;
   onSelectPart: (partId: string | null) => void;
 }
 
@@ -239,6 +240,7 @@ interface DishShowcaseProps {
   isHot: boolean;
   exploded: boolean;
   highlightedPart: string | null;
+  transitionDirection: 1 | -1;
   onSelectPart: (partId: string | null) => void;
 }
 
@@ -247,39 +249,59 @@ function DishShowcase({
   isHot,
   exploded,
   highlightedPart,
+  transitionDirection,
   onSelectPart,
 }: DishShowcaseProps) {
   const wrapperRef = useRef<THREE.Group>(null);
-  const entranceRef = useRef(0);
+  const prevDishIdRef = useRef<DishId | null>(null);
+  const settlingRef = useRef(false);
 
-  // Trigger a gentle tactile entrance whenever the active dish changes
+  // Directional chef's-counter glide whenever the active dish changes
   useEffect(() => {
-    entranceRef.current = 0;
     const group = wrapperRef.current;
-    if (group) {
-      group.scale.setScalar(0.84);
-      group.position.y = -0.14;
-      group.rotation.y = -0.22;
+    if (!group) return;
+    if (prevDishIdRef.current === dishId) return;
+
+    const isInitial = prevDishIdRef.current === null;
+    prevDishIdRef.current = dishId;
+
+    if (isInitial) {
+      group.position.set(0, -0.06, 0);
+      group.scale.setScalar(0.92);
+      group.rotation.y = -0.14;
+      settlingRef.current = true;
+      return;
     }
-  }, [dishId]);
+
+    group.position.set(transitionDirection * 1.15, -0.06, 0);
+    group.scale.setScalar(0.9);
+    group.rotation.y = -transitionDirection * 0.28;
+    settlingRef.current = true;
+  }, [dishId, transitionDirection]);
 
   useFrame((_, delta) => {
     const group = wrapperRef.current;
-    if (!group) return;
+    if (!group || !settlingRef.current) return;
 
     const dt = Math.min(delta, 0.05);
-    const lerpFactor = 1 - Math.exp(-7.5 * dt);
+    const factor = 1 - Math.exp(-8.5 * dt);
 
-    if (entranceRef.current < 0.999) {
-      entranceRef.current = THREE.MathUtils.lerp(entranceRef.current, 1, lerpFactor);
-      const t = entranceRef.current;
-      group.scale.setScalar(THREE.MathUtils.lerp(0.84, 1, t));
-      group.position.y = THREE.MathUtils.lerp(-0.14, 0, t);
-      group.rotation.y = THREE.MathUtils.lerp(-0.22, 0, t);
-    } else if (group.scale.x !== 1 || group.position.y !== 0 || group.rotation.y !== 0) {
-      group.scale.setScalar(1);
-      group.position.y = 0;
+    group.position.x = THREE.MathUtils.lerp(group.position.x, 0, factor);
+    group.position.y = THREE.MathUtils.lerp(group.position.y, 0, factor);
+    group.rotation.y = THREE.MathUtils.lerp(group.rotation.y, 0, factor);
+    const nextScale = THREE.MathUtils.lerp(group.scale.x, 1, factor);
+    group.scale.setScalar(nextScale);
+
+    if (
+      Math.abs(group.position.x) < 0.002 &&
+      Math.abs(group.position.y) < 0.002 &&
+      Math.abs(group.rotation.y) < 0.002 &&
+      Math.abs(1 - nextScale) < 0.001
+    ) {
+      group.position.set(0, 0, 0);
       group.rotation.y = 0;
+      group.scale.setScalar(1);
+      settlingRef.current = false;
     }
   });
 
@@ -326,6 +348,7 @@ interface CameraRigProps {
   dishId: DishId;
   focusedPartData: DishPart | null;
   exploded: boolean;
+  onUserInteract: () => void;
 }
 
 function CameraRig({
@@ -334,6 +357,7 @@ function CameraRig({
   dishId,
   focusedPartData,
   exploded,
+  onUserInteract,
 }: CameraRigProps) {
   const controlsRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
   const { camera } = useThree();
@@ -423,6 +447,7 @@ function CameraRig({
       onStart={() => {
         // Immediately yield control so camera never fights manual orbiting
         isGlidingRef.current = false;
+        onUserInteract();
       }}
     />
   );
@@ -434,11 +459,13 @@ export function SceneStage({
   onToggleExplode,
   highlightedPart,
   focusedPart = null,
+  transitionDirection = 1,
   onSelectPart,
 }: SceneStageProps) {
   const [autoRotate, setAutoRotate] = useState(true);
   const [resetSignal, setResetSignal] = useState(0);
   const [postProcessingFailed, setPostProcessingFailed] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
 
   const activePart = useMemo(() => {
     const id = highlightedPart ?? focusedPart;
@@ -461,6 +488,10 @@ export function SceneStage({
 
   const handlePostProcessingError = useCallback(() => {
     setPostProcessingFailed(true);
+  }, []);
+
+  const handleUserInteract = useCallback(() => {
+    setHasInteracted(true);
   }, []);
 
   const backdropInner = dish.atmosphere?.backdropInner ?? '#FFFDF9';
@@ -512,6 +543,7 @@ export function SceneStage({
           isHot={dish.isHot}
           exploded={exploded}
           highlightedPart={highlightedPart}
+          transitionDirection={transitionDirection}
           onSelectPart={onSelectPart}
         />
 
@@ -532,6 +564,7 @@ export function SceneStage({
           dishId={dish.id}
           focusedPartData={focusedPartData}
           exploded={exploded}
+          onUserInteract={handleUserInteract}
         />
 
         <CanvasFeatureErrorBoundary onError={handlePostProcessingError}>
@@ -543,88 +576,96 @@ export function SceneStage({
         </CanvasFeatureErrorBoundary>
       </Canvas>
 
-      {/* Top-left floating HUD: subtle interaction hint + active layer pill (offset cleanly below masthead) */}
-      <div className="pointer-events-none absolute top-14 left-4 z-10 flex max-w-[58%] flex-col items-start gap-2 sm:top-[66px] sm:left-6">
-        <div className="inline-flex items-center gap-2 rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/88 px-3 py-1 text-[11px] font-medium tracking-[0.02em] text-[#6B6258] shadow-[0_2px_10px_rgba(28,25,23,0.05)] backdrop-blur-md">
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#D9381E]" />
-          <span className="truncate">Interactive 3D &bull; Drag to Orbit</span>
-        </div>
-
-        {activePart && (
+      {/* Active highlighted/focused layer pill (cleanly clear of upgraded top-left masthead & tagline) */}
+      {activePart && (
+        <div className="pointer-events-none absolute top-[62px] left-3 z-10 max-w-[65%] sm:top-[88px] sm:left-6">
           <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#D9381E]/30 bg-[#FFFDF9]/95 py-1 pr-1.5 pl-3 text-xs text-[#1C1917] shadow-[0_6px_18px_rgba(217,56,30,0.14)] backdrop-blur-md transition-all">
             <span className="h-2 w-2 shrink-0 rounded-full bg-[#D9381E]" />
-            <span className="font-semibold tracking-[-0.01em]">{activePart.label}</span>
+            <span className="truncate font-semibold tracking-[-0.01em]">{activePart.label}</span>
             <button
               type="button"
               onClick={() => onSelectPart(null)}
               aria-label={`Clear ${activePart.label} highlight`}
-              className="ml-0.5 flex h-5 w-5 items-center justify-center rounded-full text-[#6B6258] transition-colors hover:bg-[#EFE8DC] hover:text-[#1C1917] cursor-pointer"
+              className="ml-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[#6B6258] transition-colors hover:bg-[#EFE8DC] hover:text-[#1C1917] cursor-pointer"
             >
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-        )}
+        </div>
+      )}
+
+      {/* Single unified top-right studio capsule: Explode Dish + divider + Auto-Rotate & Reset View */}
+      <div className="absolute top-3.5 right-3 z-20 sm:top-5 sm:right-6">
+        <div className="inline-flex items-center gap-1 rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/88 p-1 shadow-[0_6px_22px_-6px_rgba(28,25,23,0.12)] backdrop-blur-md">
+          <button
+            type="button"
+            onClick={onToggleExplode}
+            aria-pressed={exploded}
+            className={[
+              'group inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-semibold tracking-[0.01em] transition-all duration-200 cursor-pointer sm:px-3.5 sm:text-[12.5px]',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]/60',
+              exploded
+                ? 'bg-[#D9381E] text-[#FAF7F2] shadow-[0_4px_14px_rgba(217,56,30,0.3)] hover:bg-[#C33119]'
+                : 'text-[#1C1917] hover:bg-[#EFE8DC]/75',
+            ].join(' ')}
+          >
+            <Layers
+              className={[
+                'h-3.5 w-3.5 transition-transform duration-200',
+                exploded ? 'scale-105 text-[#FAF7F2]' : 'text-[#D9381E] group-hover:scale-105',
+              ].join(' ')}
+            />
+            <span>{exploded ? 'Assemble' : 'Explode'}</span>
+          </button>
+
+          <span aria-hidden="true" className="mx-0.5 h-4 w-px bg-[#E6DDD0]" />
+
+          <button
+            type="button"
+            onClick={handleToggleAutoRotate}
+            aria-pressed={autoRotate}
+            aria-label={autoRotate ? 'Pause auto-rotate' : 'Enable auto-rotate'}
+            title={autoRotate ? 'Pause Auto-Rotate' : 'Auto-Rotate'}
+            className={[
+              'inline-flex h-7 w-7 items-center justify-center rounded-full transition-all duration-200 cursor-pointer sm:h-8 sm:w-8',
+              'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]/60',
+              autoRotate
+                ? 'bg-[#D9381E]/10 text-[#D9381E] hover:bg-[#D9381E]/18'
+                : 'text-[#6B6258] hover:bg-[#EFE8DC]/75 hover:text-[#1C1917]',
+            ].join(' ')}
+          >
+            <RotateCw
+              className={[
+                'h-3.5 w-3.5 transition-transform duration-300',
+                autoRotate ? 'animate-[spin_9s_linear_infinite]' : '',
+              ].join(' ')}
+            />
+          </button>
+
+          <button
+            type="button"
+            onClick={handleResetView}
+            aria-label="Reset 3D camera view"
+            title="Reset View"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#6B6258] transition-all duration-200 hover:bg-[#EFE8DC]/75 hover:text-[#1C1917] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]/60 cursor-pointer sm:h-8 sm:w-8"
+          >
+            <RotateCcw className="h-3.5 w-3.5" />
+          </button>
+        </div>
       </div>
 
-      {/* Top-right floating HUD: Prominent Explode Dish toggle */}
-      <div className="absolute top-3.5 right-4 z-10 sm:top-4 sm:right-5">
-        <button
-          type="button"
-          onClick={onToggleExplode}
-          aria-pressed={exploded}
-          className={[
-            'group inline-flex items-center gap-2 rounded-full border px-3.5 py-2 text-xs font-semibold tracking-[0.01em] transition-all duration-200 cursor-pointer sm:px-4 sm:py-2.5 sm:text-[13px]',
-            'backdrop-blur-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]/60',
-            exploded
-              ? 'border-[#B92D17] bg-[#D9381E] text-[#FAF7F2] shadow-[0_8px_22px_rgba(217,56,30,0.32)] hover:bg-[#C33119]'
-              : 'border-[#E6DDD0] bg-[#FFFDF9]/92 text-[#1C1917] shadow-[0_6px_18px_rgba(28,25,23,0.09)] hover:border-[#D9381E]/50 hover:bg-[#FFFDF9]',
-          ].join(' ')}
-        >
-          <Layers
-            className={[
-              'h-4 w-4 transition-transform duration-200',
-              exploded ? 'scale-105 text-[#FAF7F2]' : 'text-[#D9381E] group-hover:scale-105',
-            ].join(' ')}
-          />
-          <span>{exploded ? 'Assemble Dish' : 'Explode Dish'}</span>
-        </button>
-      </div>
-
-      {/* Secondary stage controls: bottom-right on mobile, stacked cleanly under Explode Dish on lg+ to stay clear of DishDock */}
-      <div className="absolute right-4 bottom-4 z-10 flex items-center gap-1.5 sm:right-5 sm:bottom-5 lg:top-[66px] lg:right-5 lg:bottom-auto">
-        <button
-          type="button"
-          onClick={handleToggleAutoRotate}
-          aria-pressed={autoRotate}
-          aria-label={autoRotate ? 'Pause auto-rotate' : 'Enable auto-rotate'}
-          title={autoRotate ? 'Pause Auto-Rotate' : 'Auto-Rotate'}
-          className={[
-            'inline-flex h-8 items-center gap-1.5 rounded-full border px-2.5 text-[11px] font-medium transition-all duration-200 backdrop-blur-md cursor-pointer sm:h-9 sm:px-3',
-            'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]/60',
-            autoRotate
-              ? 'border-[#D9381E]/35 bg-[#FFFDF9]/92 text-[#D9381E] shadow-[0_4px_12px_rgba(217,56,30,0.1)]'
-              : 'border-[#E6DDD0] bg-[#FFFDF9]/85 text-[#6B6258] shadow-[0_4px_12px_rgba(28,25,23,0.06)] hover:text-[#1C1917]',
-          ].join(' ')}
-        >
-          <RotateCw
-            className={[
-              'h-3.5 w-3.5 transition-transform duration-300',
-              autoRotate ? 'animate-[spin_9s_linear_infinite]' : '',
-            ].join(' ')}
-          />
-          <span className="hidden sm:inline">Rotate</span>
-        </button>
-
-        <button
-          type="button"
-          onClick={handleResetView}
-          aria-label="Reset 3D camera view"
-          title="Reset View"
-          className="inline-flex h-8 items-center gap-1.5 rounded-full border border-[#E6DDD0] bg-[#FFFDF9]/85 px-2.5 text-[11px] font-medium text-[#6B6258] shadow-[0_4px_12px_rgba(28,25,23,0.06)] backdrop-blur-md transition-all duration-200 hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] hover:text-[#1C1917] focus:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]/60 cursor-pointer sm:h-9 sm:px-3"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-          <span className="hidden sm:inline">Reset</span>
-        </button>
+      {/* Auto-fading gallery interaction whisper — fades out smoothly once the user orbits */}
+      <div
+        aria-hidden={hasInteracted}
+        className={[
+          'pointer-events-none absolute bottom-3.5 left-3 z-10 transition-opacity duration-500 sm:bottom-4 sm:left-6 lg:bottom-[6.25rem] lg:left-1/2 lg:-translate-x-1/2 xl:bottom-[7.5rem]',
+          hasInteracted ? 'opacity-0' : 'opacity-100',
+        ].join(' ')}
+      >
+        <p className="inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0]/70 bg-[#FFFDF9]/72 px-3 py-1 text-[11px] font-medium tracking-[0.02em] text-[#786E63] backdrop-blur-sm">
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#D9381E]/80" />
+          <span>Drag to orbit &middot; Scroll to zoom</span>
+        </p>
       </div>
     </div>
   );
