@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ArrowLeft,
   ArrowRight,
@@ -12,7 +12,9 @@ import {
   Flame,
   Layers,
   LayoutGrid,
+  Link2,
   MapPin,
+  MessageSquareShare,
   Play,
   RotateCcw,
   Share2,
@@ -86,6 +88,7 @@ export interface RecipePanelProps {
   onSelectPart: (partId: string | null) => void;
   onSelectDish: (id: DishId, direction?: 1 | -1) => void;
   onShare: () => void;
+  onNativeShare?: () => void;
   shareCopied: boolean;
   scale: ScaleFactor;
   onChangeScale: (scale: ScaleFactor) => void;
@@ -108,6 +111,7 @@ export function RecipePanel({
   onSelectPart,
   onSelectDish,
   onShare,
+  onNativeShare,
   shareCopied,
   scale,
   onChangeScale,
@@ -118,6 +122,56 @@ export function RecipePanel({
   onOpenMenu,
   onOpenAbout,
 }: RecipePanelProps) {
+  const [sharePopoverOpen, setSharePopoverOpen] = useState(false);
+  const [canNativeShare, setCanNativeShare] = useState(false);
+  const sharePopoverRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    setCanNativeShare(
+      typeof navigator !== 'undefined' && typeof navigator.share === 'function'
+    );
+  }, []);
+
+  // Close share popover when switching dishes
+  useEffect(() => {
+    setSharePopoverOpen(false);
+  }, [dish.id]);
+
+  // Close share popover on outside click or Escape
+  useEffect(() => {
+    if (!sharePopoverOpen) return;
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (
+        sharePopoverRef.current &&
+        !sharePopoverRef.current.contains(event.target as Node)
+      ) {
+        setSharePopoverOpen(false);
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.stopPropagation();
+        setSharePopoverOpen(false);
+      }
+    };
+
+    document.addEventListener('mousedown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [sharePopoverOpen]);
+
+  const canonicalDishUrl = `https://www.stanley.eat/dish/${dish.id}`;
+  const xShareHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
+    `Checking out ${dish.name} in interactive 3D on stanley.eat by @stanleycyang`
+  )}&url=${encodeURIComponent(canonicalDishUrl)}`;
+  const linkedInShareHref = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
+    canonicalDishUrl
+  )}`;
   const partLookup = useMemo(() => {
     const map: Record<string, string> = {};
     for (const part of dish.parts) {
@@ -181,32 +235,148 @@ export function RecipePanel({
               <span>Cook</span>
             </button>
 
-            <button
-              type="button"
-              onClick={onShare}
-              aria-label={
-                shareCopied
-                  ? 'Recipe link copied to clipboard'
-                  : `Share ${dish.name} recipe link`
-              }
-              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11.5px] font-semibold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
-                shareCopied
-                  ? 'border-[#D9381E] bg-[#FFF5F0] text-[#D9381E]'
-                  : 'border-[#E6DDD0] bg-[#FAF7F2] text-[#3F3A34] hover:border-[#D6C8B6] hover:bg-[#EFE8DC]/70'
-              }`}
-            >
-              {shareCopied ? (
-                <>
-                  <Check className="h-3 w-3" aria-hidden="true" />
-                  <span>Copied!</span>
-                </>
-              ) : (
-                <>
-                  <Share2 className="h-3 w-3 text-[#6B6258]" aria-hidden="true" />
-                  <span className="hidden sm:inline">Share</span>
-                </>
+            <div ref={sharePopoverRef} className="relative">
+              <button
+                type="button"
+                onClick={() => setSharePopoverOpen((prev) => !prev)}
+                aria-expanded={sharePopoverOpen}
+                aria-haspopup="menu"
+                aria-label={
+                  shareCopied
+                    ? 'Recipe link copied to clipboard'
+                    : `Share ${dish.name}`
+                }
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11.5px] font-semibold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
+                  shareCopied || sharePopoverOpen
+                    ? 'border-[#D9381E] bg-[#FFF5F0] text-[#D9381E]'
+                    : 'border-[#E6DDD0] bg-[#FAF7F2] text-[#3F3A34] hover:border-[#D6C8B6] hover:bg-[#EFE8DC]/70'
+                }`}
+              >
+                {shareCopied ? (
+                  <>
+                    <Check className="h-3 w-3" aria-hidden="true" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Share2 className="h-3 w-3 text-[#6B6258]" aria-hidden="true" />
+                    <span className="hidden sm:inline">Share</span>
+                  </>
+                )}
+              </button>
+
+              {sharePopoverOpen && (
+                <div
+                  role="menu"
+                  aria-label={`Share ${dish.name}`}
+                  className="absolute top-full right-0 z-30 mt-2 w-64 origin-top-right rounded-2xl border border-[#E6DDD0] bg-[#FFFDF9]/98 p-2 text-[#1C1917] shadow-[0_18px_44px_-12px_rgba(28,25,23,0.24)] backdrop-blur-md"
+                >
+                  <div className="mb-1.5 border-b border-[#EFE8DC] px-2.5 pt-1 pb-2">
+                    <p className="font-serif text-[13px] font-semibold text-[#1C1917]">
+                      Share {dish.shortLabel}
+                    </p>
+                    <p className="truncate font-mono text-[10.5px] text-[#8A7E71]">
+                      stanley.eat/dish/{dish.id}
+                    </p>
+                  </div>
+
+                  <div className="space-y-0.5">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      onClick={onShare}
+                      className="flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-medium text-[#1C1917] transition-colors hover:bg-[#FAF7F2] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
+                    >
+                      <span className="flex items-center gap-2">
+                        {shareCopied ? (
+                          <Check
+                            className="h-3.5 w-3.5 text-[#D9381E]"
+                            aria-hidden="true"
+                          />
+                        ) : (
+                          <Link2
+                            className="h-3.5 w-3.5 text-[#6B6258]"
+                            aria-hidden="true"
+                          />
+                        )}
+                        <span>{shareCopied ? 'Copied!' : 'Copy Dish Link'}</span>
+                      </span>
+                      {shareCopied && (
+                        <span className="font-mono text-[10px] font-semibold text-[#D9381E]">
+                          Ready
+                        </span>
+                      )}
+                    </button>
+
+                    <a
+                      role="menuitem"
+                      href={xShareHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setSharePopoverOpen(false)}
+                      className="flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-xs font-medium text-[#1C1917] transition-colors hover:bg-[#FAF7F2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span
+                          aria-hidden="true"
+                          className="flex h-3.5 w-3.5 items-center justify-center font-mono text-[11px] font-bold text-[#1C1917]"
+                        >
+                          𝕏
+                        </span>
+                        <span>Share on X</span>
+                      </span>
+                      <ExternalLink
+                        className="h-3 w-3 text-[#9B8E80]"
+                        aria-hidden="true"
+                      />
+                    </a>
+
+                    <a
+                      role="menuitem"
+                      href={linkedInShareHref}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={() => setSharePopoverOpen(false)}
+                      className="flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-xs font-medium text-[#1C1917] transition-colors hover:bg-[#FAF7F2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
+                    >
+                      <span className="flex items-center gap-2">
+                        <span
+                          aria-hidden="true"
+                          className="flex h-3.5 w-3.5 items-center justify-center rounded-[3px] bg-[#6B6258]/15 font-sans text-[9.5px] font-bold text-[#3F3A34]"
+                        >
+                          in
+                        </span>
+                        <span>Share on LinkedIn</span>
+                      </span>
+                      <ExternalLink
+                        className="h-3 w-3 text-[#9B8E80]"
+                        aria-hidden="true"
+                      />
+                    </a>
+
+                    {canNativeShare && onNativeShare && (
+                      <button
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setSharePopoverOpen(false);
+                          onNativeShare();
+                        }}
+                        className="flex w-full items-center justify-between gap-2 rounded-xl border-t border-[#EFE8DC] mt-1 pt-2 px-2.5 py-2 text-left text-xs font-medium text-[#D9381E] transition-colors hover:bg-[#FFF5F0] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
+                      >
+                        <span className="flex items-center gap-2">
+                          <MessageSquareShare
+                            className="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          />
+                          <span>More / iMessage…</span>
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                </div>
               )}
-            </button>
+            </div>
           </div>
         </div>
       </div>

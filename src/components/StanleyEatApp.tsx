@@ -41,9 +41,18 @@ function computeShortestDirection(
   return forward <= backward ? 1 : -1;
 }
 
-export function StanleyEatApp() {
+export interface StanleyEatAppProps {
+  initialDishId?: DishId;
+}
+
+export function StanleyEatApp({ initialDishId }: StanleyEatAppProps = {}) {
   const searchParams = useSearchParams();
-  const initialDish = getDishById(searchParams.get('dish'));
+  const paramDishOnMount = searchParams.get('dish');
+  const initialDish = paramDishOnMount
+    ? getDishById(paramDishOnMount)
+    : initialDishId
+      ? getDishById(initialDishId)
+      : RECIPES[0];
 
   const [activeDishId, setActiveDishId] = useState<DishId>(initialDish.id);
   const [transitionDirection, setTransitionDirection] = useState<1 | -1>(1);
@@ -140,13 +149,7 @@ export function StanleyEatApp() {
       setHoveredPart(null);
 
       if (typeof window !== 'undefined') {
-        const url = new URL(window.location.href);
-        url.searchParams.set('dish', nextId);
-        window.history.replaceState(
-          null,
-          '',
-          `${url.pathname}${url.search}${url.hash}`
-        );
+        window.history.replaceState(null, '', `/dish/${nextId}`);
       }
 
       if (recipeScrollRef.current) {
@@ -200,9 +203,16 @@ export function StanleyEatApp() {
     }));
   }, [activeDish.id]);
 
+  const getDishShareUrl = useCallback((dishId: DishId) => {
+    if (typeof window !== 'undefined') {
+      return `${window.location.origin}/dish/${dishId}`;
+    }
+    return `https://www.stanley.eat/dish/${dishId}`;
+  }, []);
+
   const handleShare = useCallback(async () => {
     if (typeof window === 'undefined') return;
-    const shareUrl = `${window.location.origin}${window.location.pathname}?dish=${activeDish.id}`;
+    const shareUrl = getDishShareUrl(activeDish.id);
 
     let copied = false;
     if (
@@ -228,7 +238,29 @@ export function StanleyEatApp() {
         setShareCopied(false);
       }, 2000);
     }
-  }, [activeDish.id]);
+  }, [activeDish.id, getDishShareUrl]);
+
+  const handleNativeShare = useCallback(async () => {
+    if (typeof window === 'undefined') return;
+    const shareUrl = getDishShareUrl(activeDish.id);
+
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
+      try {
+        await navigator.share({
+          title: `${activeDish.name} — stanley.eat`,
+          text: `${activeDish.subtitle} — interactive 3D dish & recipe`,
+          url: shareUrl,
+        });
+        return;
+      } catch (err) {
+        if (err instanceof DOMException && err.name === 'AbortError') {
+          return;
+        }
+      }
+    }
+
+    await handleShare();
+  }, [activeDish.id, activeDish.name, activeDish.subtitle, getDishShareUrl, handleShare]);
 
   const handleOpenCookMode = useCallback(() => {
     setMenuOpen(false);
@@ -411,6 +443,7 @@ export function StanleyEatApp() {
           onSelectPart={handleSelectPart}
           onSelectDish={handleSelectDish}
           onShare={handleShare}
+          onNativeShare={handleNativeShare}
           shareCopied={shareCopied}
           scale={activeScale}
           onChangeScale={handleChangeScale}
