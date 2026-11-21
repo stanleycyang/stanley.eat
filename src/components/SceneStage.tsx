@@ -11,11 +11,19 @@ import React, {
 } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { ContactShadows, Environment, OrbitControls } from '@react-three/drei';
+import {
+  Bloom,
+  EffectComposer,
+  ToneMapping,
+  Vignette,
+} from '@react-three/postprocessing';
+import { ToneMappingMode } from 'postprocessing';
 import { Layers, RotateCcw, RotateCw, X } from 'lucide-react';
 import * as THREE from 'three';
 
-import type { DishId, DishRecipe } from '@/types/dish';
+import type { DishAtmosphere, DishId, DishPart, DishRecipe } from '@/types/dish';
 import { SteamParticles } from './SteamParticles';
+import { TableSurface } from './TableSurface';
 import { CurryModel } from './foods/CurryModel';
 import { PizzaModel } from './foods/PizzaModel';
 import { SushiModel } from './foods/SushiModel';
@@ -29,6 +37,7 @@ export interface SceneStageProps {
   exploded: boolean;
   onToggleExplode: () => void;
   highlightedPart: string | null;
+  focusedPart?: string | null;
   onSelectPart: (partId: string | null) => void;
 }
 
@@ -53,7 +62,7 @@ interface BoundaryState {
   hasError: boolean;
 }
 
-class EnvironmentErrorBoundary extends Component<BoundaryProps, BoundaryState> {
+class CanvasFeatureErrorBoundary extends Component<BoundaryProps, BoundaryState> {
   constructor(props: BoundaryProps) {
     super(props);
     this.state = { hasError: false };
@@ -69,6 +78,85 @@ class EnvironmentErrorBoundary extends Component<BoundaryProps, BoundaryState> {
     }
     return this.props.children;
   }
+}
+
+interface AtmosphereLightsProps {
+  atmosphere: DishAtmosphere;
+}
+
+function AtmosphereLights({ atmosphere }: AtmosphereLightsProps) {
+  const keyLightRef = useRef<THREE.DirectionalLight>(null);
+  const ambientLightRef = useRef<THREE.AmbientLight>(null);
+  const hemiLightRef = useRef<THREE.HemisphereLight>(null);
+
+  const targetKeyColor = useMemo(() => new THREE.Color(), []);
+  const targetAmbientColor = useMemo(() => new THREE.Color(), []);
+
+  useFrame((_, delta) => {
+    const dt = Math.min(delta, 0.05);
+    const factor = 1 - Math.exp(-5.5 * dt);
+
+    if (keyLightRef.current) {
+      targetKeyColor.set(atmosphere.keyLightColor);
+      keyLightRef.current.color.lerp(targetKeyColor, factor);
+      keyLightRef.current.intensity = THREE.MathUtils.lerp(
+        keyLightRef.current.intensity,
+        atmosphere.keyLightIntensity,
+        factor
+      );
+    }
+
+    if (ambientLightRef.current) {
+      targetAmbientColor.set(atmosphere.ambientTint);
+      ambientLightRef.current.color.lerp(targetAmbientColor, factor);
+    }
+
+    if (hemiLightRef.current) {
+      targetAmbientColor.set(atmosphere.ambientTint);
+      hemiLightRef.current.color.lerp(targetAmbientColor, factor);
+    }
+  });
+
+  return (
+    <>
+      <ambientLight
+        ref={ambientLightRef}
+        intensity={0.36}
+        color={atmosphere.ambientTint}
+      />
+      <hemisphereLight
+        ref={hemiLightRef}
+        args={[atmosphere.ambientTint, '#C8B49E', 0.68]}
+      />
+      <directionalLight
+        ref={keyLightRef}
+        castShadow
+        position={[4.5, 7.5, 4.5]}
+        intensity={atmosphere.keyLightIntensity}
+        color={atmosphere.keyLightColor}
+        shadow-mapSize={[1024, 1024]}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.015}
+        shadow-camera-near={1}
+        shadow-camera-far={20}
+        shadow-camera-left={-3.6}
+        shadow-camera-right={3.6}
+        shadow-camera-top={3.6}
+        shadow-camera-bottom={-3.6}
+      />
+      {/* Cool studio rim fill + subtle warm back bounce */}
+      <directionalLight
+        position={[-4.2, 4.0, -3.5]}
+        intensity={0.62}
+        color="#EAF1FF"
+      />
+      <directionalLight
+        position={[2.0, 1.8, -4.5]}
+        intensity={0.34}
+        color="#FFE1C6"
+      />
+    </>
+  );
 }
 
 interface DishShowcaseProps {
@@ -160,43 +248,90 @@ function DishShowcase({
 interface CameraRigProps {
   autoRotate: boolean;
   resetSignal: number;
+  dishId: DishId;
+  focusedPartData: DishPart | null;
+  exploded: boolean;
 }
 
-function CameraRig({ autoRotate, resetSignal }: CameraRigProps) {
+function CameraRig({
+  autoRotate,
+  resetSignal,
+  dishId,
+  focusedPartData,
+  exploded,
+}: CameraRigProps) {
   const controlsRef = useRef<React.ComponentRef<typeof OrbitControls>>(null);
   const { camera } = useThree();
-  const isResettingRef = useRef(false);
-  const targetPos = useMemo(() => new THREE.Vector3(...DEFAULT_CAMERA_POSITION), []);
-  const targetLookAt = useMemo(() => new THREE.Vector3(...DEFAULT_CAMERA_TARGET), []);
 
+  const isGlidingRef = useRef(false);
+  const hadFocusRef = useRef(false);
+  const prevDishRef = useRef<DishId>(dishId);
+
+  const desiredPos = useMemo(() => new THREE.Vector3(...DEFAULT_CAMERA_POSITION), []);
+  const desiredTarget = useMemo(() => new THREE.Vector3(...DEFAULT_CAMERA_TARGET), []);
+
+  // Glide back to canonical framing on explicit Reset View
   useEffect(() => {
     if (resetSignal > 0) {
-      isResettingRef.current = true;
+      desiredPos.set(...DEFAULT_CAMERA_POSITION);
+      desiredTarget.set(...DEFAULT_CAMERA_TARGET);
+      isGlidingRef.current = true;
     }
-  }, [resetSignal]);
+  }, [resetSignal, desiredPos, desiredTarget]);
+
+  // Glide smoothly when focusedPart changes or dish switches
+  useEffect(() => {
+    const dishChanged = prevDishRef.current !== dishId;
+    prevDishRef.current = dishId;
+
+    if (focusedPartData?.cameraFocus) {
+      const { position, target } = focusedPartData.cameraFocus;
+      const explodeYTarget = exploded ? 0.36 : 0;
+      const explodeYCam = exploded ? 0.48 : 0;
+      const explodePullback = exploded ? 1.08 : 1;
+
+      desiredTarget.set(target[0], target[1] + explodeYTarget, target[2]);
+      desiredPos.set(
+        position[0] * explodePullback,
+        position[1] + explodeYCam,
+        position[2] * explodePullback
+      );
+      isGlidingRef.current = true;
+      hadFocusRef.current = true;
+    } else if (hadFocusRef.current || dishChanged) {
+      // Returning from a focused inspection or switching dishes restores default framing
+      desiredPos.set(...DEFAULT_CAMERA_POSITION);
+      desiredTarget.set(...DEFAULT_CAMERA_TARGET);
+      isGlidingRef.current = true;
+      hadFocusRef.current = false;
+    }
+  }, [dishId, focusedPartData, exploded, desiredPos, desiredTarget]);
 
   useFrame((_, delta) => {
-    if (!isResettingRef.current) return;
+    if (!isGlidingRef.current) return;
     const controls = controlsRef.current;
     if (!controls) return;
 
     const dt = Math.min(delta, 0.05);
-    const factor = 1 - Math.exp(-7 * dt);
+    const factor = 1 - Math.exp(-6.2 * dt);
 
-    camera.position.lerp(targetPos, factor);
-    controls.target.lerp(targetLookAt, factor);
+    camera.position.lerp(desiredPos, factor);
+    controls.target.lerp(desiredTarget, factor);
     controls.update();
 
     if (
-      camera.position.distanceTo(targetPos) < 0.015 &&
-      controls.target.distanceTo(targetLookAt) < 0.015
+      camera.position.distanceTo(desiredPos) < 0.015 &&
+      controls.target.distanceTo(desiredTarget) < 0.015
     ) {
-      camera.position.copy(targetPos);
-      controls.target.copy(targetLookAt);
+      camera.position.copy(desiredPos);
+      controls.target.copy(desiredTarget);
       controls.update();
-      isResettingRef.current = false;
+      isGlidingRef.current = false;
     }
   });
+
+  // Pause auto-rotate while actively inspecting a click-focused part
+  const effectiveAutoRotate = autoRotate && !focusedPartData;
 
   return (
     <OrbitControls
@@ -206,14 +341,15 @@ function CameraRig({ autoRotate, resetSignal }: CameraRigProps) {
       enableDamping
       dampingFactor={0.07}
       enablePan={false}
-      minDistance={2.8}
+      minDistance={2.2}
       maxDistance={8.5}
       minPolarAngle={0.2}
       maxPolarAngle={Math.PI / 2.1}
-      autoRotate={autoRotate}
+      autoRotate={effectiveAutoRotate}
       autoRotateSpeed={0.85}
       onStart={() => {
-        isResettingRef.current = false;
+        // Immediately yield control so camera never fights manual orbiting
+        isGlidingRef.current = false;
       }}
     />
   );
@@ -224,42 +360,48 @@ export function SceneStage({
   exploded,
   onToggleExplode,
   highlightedPart,
+  focusedPart = null,
   onSelectPart,
 }: SceneStageProps) {
   const [autoRotate, setAutoRotate] = useState(true);
   const [resetSignal, setResetSignal] = useState(0);
 
-  const activePart = useMemo(
-    () =>
-      highlightedPart
-        ? dish.parts.find((part) => part.id === highlightedPart) ?? null
-        : null,
-    [dish.parts, highlightedPart]
+  const activePart = useMemo(() => {
+    const id = highlightedPart ?? focusedPart;
+    return id ? dish.parts.find((part) => part.id === id) ?? null : null;
+  }, [dish.parts, highlightedPart, focusedPart]);
+
+  const focusedPartData = useMemo(
+    () => (focusedPart ? dish.parts.find((part) => part.id === focusedPart) ?? null : null),
+    [dish.parts, focusedPart]
   );
 
   const handleResetView = useCallback(() => {
+    onSelectPart(null);
     setResetSignal((n) => n + 1);
-  }, []);
+  }, [onSelectPart]);
 
   const handleToggleAutoRotate = useCallback(() => {
     setAutoRotate((prev) => !prev);
   }, []);
 
+  const backdropInner = dish.atmosphere?.backdropInner ?? '#FFFDF9';
+  const backdropOuter = dish.atmosphere?.backdropOuter ?? '#EFE8DC';
+
   return (
     <div
-      className="relative h-full w-full overflow-hidden select-none bg-[#FAF7F2]"
+      className="relative h-full w-full overflow-hidden select-none bg-[#FAF7F2] transition-[background-image] duration-500"
       style={{
-        backgroundImage:
-          'radial-gradient(ellipse 75% 65% at 50% 48%, #FFFDF9 0%, #FAF7F2 56%, #EFE8DC 100%)',
+        backgroundImage: `radial-gradient(ellipse 76% 66% at 50% 48%, ${backdropInner} 0%, ${backdropOuter} 100%)`,
       }}
     >
-      {/* Subtle studio tabletop vignette halo */}
+      {/* Subtle warm tabletop glow behind the focal dish */}
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0"
         style={{
           background:
-            'radial-gradient(circle at 50% 62%, rgba(217, 56, 30, 0.035) 0%, rgba(250, 247, 242, 0) 58%)',
+            'radial-gradient(circle at 50% 60%, rgba(217, 56, 30, 0.03) 0%, rgba(250, 247, 242, 0) 58%)',
         }}
       />
 
@@ -271,44 +413,20 @@ export function SceneStage({
           antialias: true,
           alpha: true,
           toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.05,
+          toneMappingExposure: 1.04,
         }}
         onPointerMissed={() => onSelectPart(null)}
         className="h-full w-full cursor-grab active:cursor-grabbing"
       >
-        <EnvironmentErrorBoundary>
+        <CanvasFeatureErrorBoundary>
           <Suspense fallback={null}>
             <Environment preset="studio" />
           </Suspense>
-        </EnvironmentErrorBoundary>
+        </CanvasFeatureErrorBoundary>
 
-        {/* Warm studio lighting rig (also looks balanced offline if Environment fails) */}
-        <ambientLight intensity={0.38} color="#FFF8EE" />
-        <hemisphereLight args={['#FFFDF9', '#D6C4AE', 0.72]} />
-        <directionalLight
-          castShadow
-          position={[4.5, 7.5, 4.5]}
-          intensity={1.7}
-          color="#FFF5E6"
-          shadow-mapSize={[1024, 1024]}
-          shadow-bias={-0.0004}
-          shadow-camera-near={1}
-          shadow-camera-far={20}
-          shadow-camera-left={-3.5}
-          shadow-camera-right={3.5}
-          shadow-camera-top={3.5}
-          shadow-camera-bottom={-3.5}
-        />
-        <directionalLight
-          position={[-4.2, 4.0, -3.5]}
-          intensity={0.65}
-          color="#EAF1FF"
-        />
-        <directionalLight
-          position={[2.0, 1.8, -4.5]}
-          intensity={0.35}
-          color="#FFE1C6"
-        />
+        <AtmosphereLights atmosphere={dish.atmosphere} />
+
+        <TableSurface surface={dish.atmosphere.surface} />
 
         <DishShowcase
           dishId={dish.id}
@@ -319,15 +437,29 @@ export function SceneStage({
         />
 
         <ContactShadows
-          position={[0, -0.55, 0]}
-          opacity={0.38}
-          scale={7.5}
-          blur={2.4}
-          far={3.5}
-          color="#4A3828"
+          position={[0, -0.535, 0]}
+          opacity={0.42}
+          scale={6.8}
+          blur={2.2}
+          far={3.2}
+          color="#3B2B1E"
         />
 
-        <CameraRig autoRotate={autoRotate} resetSignal={resetSignal} />
+        <CameraRig
+          autoRotate={autoRotate}
+          resetSignal={resetSignal}
+          dishId={dish.id}
+          focusedPartData={focusedPartData}
+          exploded={exploded}
+        />
+
+        <CanvasFeatureErrorBoundary>
+          <EffectComposer multisampling={4}>
+            <Bloom luminanceThreshold={0.92} mipmapBlur intensity={0.25} />
+            <Vignette darkness={0.22} offset={0.35} />
+            <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
+          </EffectComposer>
+        </CanvasFeatureErrorBoundary>
       </Canvas>
 
       {/* Top-left floating HUD: subtle interaction hint + active layer pill (offset cleanly below masthead) */}

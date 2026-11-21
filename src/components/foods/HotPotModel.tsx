@@ -4,6 +4,11 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { FoodModelProps } from '@/types/dish';
+import {
+  createBrothShaderMaterial,
+  getOrganicNoiseBump,
+  getSlateTextures,
+} from '@/lib/proceduralTextures';
 import { FoodLayer } from './FoodLayer';
 
 interface BubbleSpec {
@@ -79,28 +84,32 @@ const SCALLION_BATONS: FloatingItem[] = [
   { pos: [0.06, 0.126, -0.42], rot: [0.06, -0.5, Math.PI / 2], phase: 4.0 },
 ];
 
+const MALA_BASE_COLOR = new THREE.Color('#9E140B');
+const MALA_HI_COLOR = new THREE.Color('#CC2818');
+const BONE_BASE_COLOR = new THREE.Color('#DFCFAF');
+const BONE_HI_COLOR = new THREE.Color('#F5E8CC');
+
 // Helper to sample the authentic Yin-Yang S-curve from (0, +R) down to (0, -R)
-function sampleSCurvePoints(radius: number, halfSegments: number): { x: number; y: number; nx: number; ny: number }[] {
+function sampleSCurvePoints(
+  radius: number,
+  halfSegments: number
+): { x: number; y: number; nx: number; ny: number }[] {
   const r = radius / 2;
   const result: { x: number; y: number; nx: number; ny: number }[] = [];
 
-  // Upper semicircle: center (0, +r), curving right (+x), t from 0 (0, +R) to pi (0, 0)
   for (let i = 0; i <= halfSegments; i++) {
     const t = (i / halfSegments) * Math.PI;
     const x = r * Math.sin(t);
     const y = r + r * Math.cos(t);
-    // Tangent is (r cos t, -r sin t) -> unit left normal (pointing into left/mala half) is (-sin t, -cos t)
     const nx = -Math.sin(t);
     const ny = -Math.cos(t);
     result.push({ x, y, nx, ny });
   }
 
-  // Lower semicircle: center (0, -r), curving left (-x), t from 0 (0, 0) to pi (0, -R)
   for (let i = 1; i <= halfSegments; i++) {
     const t = (i / halfSegments) * Math.PI;
     const x = -r * Math.sin(t);
     const y = -r + r * Math.cos(t);
-    // Tangent is (-r cos t, -r sin t) -> unit left normal (pointing into left/mala half) is (-sin t, cos t)
     const nx = -Math.sin(t);
     const ny = Math.cos(t);
     result.push({ x, y, nx, ny });
@@ -124,9 +133,38 @@ export function HotPotModel({
     onSelectPart(highlightedPart === partId ? null : partId);
   };
 
+  // Shared cached procedural PBR textures (do NOT dispose cached singletons)
+  const brushedSteelBump = useMemo(() => getOrganicNoiseBump(503, 18), []);
+  const gripSlateTex = useMemo(() => getSlateTextures(), []);
+  const organicBump = useMemo(() => getOrganicNoiseBump(547, 12), []);
+
+  // Per-instance animated GLSL broth shaders (disposed cleanly on unmount)
+  const malaBrothMat = useMemo(
+    () =>
+      createBrothShaderMaterial({
+        baseColor: '#9E140B',
+        oilColor: '#E53517',
+        sheenColor: '#FFB070',
+        isSpicy: true,
+        opacity: 0.96,
+      }),
+    []
+  );
+
+  const boneBrothMat = useMemo(
+    () =>
+      createBrothShaderMaterial({
+        baseColor: '#DFCFAF',
+        oilColor: '#F6E8B8',
+        sheenColor: '#FFFDF4',
+        isSpicy: false,
+        opacity: 0.95,
+      }),
+    []
+  );
+
   // Brushed stainless-steel pot + handles + S-curve divider wall
   const { potGeo, dividerGeo, handleGeo } = useMemo(() => {
-    // Round pot profile with induction foot, curved belly, wide flared stainless rim
     const potPts = [
       new THREE.Vector2(0.0, -0.48),
       new THREE.Vector2(0.92, -0.48),
@@ -134,7 +172,7 @@ export function HotPotModel({
       new THREE.Vector2(1.18, -0.26),
       new THREE.Vector2(1.26, -0.02),
       new THREE.Vector2(1.29, 0.2),
-      new THREE.Vector2(1.38, 0.24), // flared brushed steel lip
+      new THREE.Vector2(1.38, 0.24),
       new THREE.Vector2(1.4, 0.265),
       new THREE.Vector2(1.35, 0.275),
       new THREE.Vector2(1.25, 0.23),
@@ -146,7 +184,6 @@ export function HotPotModel({
     const pot = new THREE.LatheGeometry(potPts, 64);
     pot.computeVertexNormals();
 
-    // Authentic S-curve metallic divider wall extruded vertically across the pot
     const R = 1.24;
     const samples = sampleSCurvePoints(R, 28);
     const halfT = 0.026;
@@ -177,7 +214,6 @@ export function HotPotModel({
     divider.translate(0, -0.39, 0);
     divider.computeVertexNormals();
 
-    // Side loop handle arch
     const hCurve = new THREE.CatmullRomCurve3([
       new THREE.Vector3(0.0, 0.04, -0.26),
       new THREE.Vector3(0.24, 0.1, -0.2),
@@ -197,9 +233,7 @@ export function HotPotModel({
     const arcSteps = 32;
     const sSamples = sampleSCurvePoints(R, 26);
 
-    // Left (Mala) S-curve shape
     const malaShape = new THREE.Shape();
-    // Outer left semicircle from (0, +R) CCW through (-R, 0) to (0, -R)
     for (let i = 0; i <= arcSteps; i++) {
       const a = Math.PI / 2 + (i / arcSteps) * Math.PI;
       const px = Math.cos(a) * R;
@@ -207,10 +241,8 @@ export function HotPotModel({
       if (i === 0) malaShape.moveTo(px, py);
       else malaShape.lineTo(px, py);
     }
-    // Follow S-curve back up from (0, -R) to (0, +R), nudged slightly into the left side
     for (let i = sSamples.length - 1; i >= 0; i--) {
       const s = sSamples[i];
-      // Taper nudge to 0 at endpoints so shape closes neatly on the perimeter
       const edgeTaper = Math.sin((i / (sSamples.length - 1)) * Math.PI);
       malaShape.lineTo(s.x + s.nx * gap * edgeTaper, s.y + s.ny * gap * edgeTaper);
     }
@@ -227,9 +259,7 @@ export function HotPotModel({
     malaGeo.translate(0, -0.34, 0);
     malaGeo.computeVertexNormals();
 
-    // Right (Bone) S-curve shape
     const boneShape = new THREE.Shape();
-    // Outer right semicircle from (0, -R) CCW through (+R, 0) to (0, +R)
     for (let i = 0; i <= arcSteps; i++) {
       const a = -Math.PI / 2 + (i / arcSteps) * Math.PI;
       const px = Math.cos(a) * R;
@@ -237,7 +267,6 @@ export function HotPotModel({
       if (i === 0) boneShape.moveTo(px, py);
       else boneShape.lineTo(px, py);
     }
-    // Follow S-curve down from (0, +R) to (0, -R), nudged slightly into the right side
     for (let i = 0; i < sSamples.length; i++) {
       const s = sSamples[i];
       const edgeTaper = Math.sin((i / (sSamples.length - 1)) * Math.PI);
@@ -269,7 +298,6 @@ export function HotPotModel({
       new THREE.Vector3(0.22, -0.02, -0.09),
     ]);
     const geo = new THREE.TubeGeometry(curve, 24, 0.032, 10, false);
-    // Gently taper towards the tip of the chili
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -289,12 +317,10 @@ export function HotPotModel({
     const shape = new THREE.Shape();
     shape.absarc(0, 0, outerR, 0, Math.PI * 2, false);
 
-    // Center pinhole
     const centerHole = new THREE.Path();
     centerHole.absarc(0, 0, 0.028, 0, Math.PI * 2, true);
     shape.holes.push(centerHole);
 
-    // 7 iconic radial lotus root holes
     for (let i = 0; i < 7; i++) {
       const ang = (i / 7) * Math.PI * 2;
       const hx = Math.cos(ang) * 0.132;
@@ -333,19 +359,18 @@ export function HotPotModel({
       bevelSegments: 2,
     });
     geo.rotateX(-Math.PI / 2);
-    // Add organic ruffled curvature
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
       const y = pos.getY(i);
       const z = pos.getZ(i);
-      pos.setY(i, y + Math.sin(x * 16) * 0.014 + Math.abs(x) * 0.16 + (-z) * 0.18);
+      pos.setY(i, y + Math.sin(x * 16) * 0.014 + Math.abs(x) * 0.16 + -z * 0.18);
     }
     geo.computeVertexNormals();
     return geo;
   }, []);
 
-  // Spiraled marbled beef roll geometry (spiral ribbon extruded cleanly)
+  // Spiraled marbled beef roll geometry
   const { beefSpiralMeatGeo, beefSpiralFatGeo } = useMemo(() => {
     const makeSpiral = (thickness: number, offsetR: number) => {
       const pts: THREE.Vector2[] = [];
@@ -416,6 +441,8 @@ export function HotPotModel({
       bokChoyLeafGeo.dispose();
       beefSpiralMeatGeo.dispose();
       beefSpiralFatGeo.dispose();
+      malaBrothMat.dispose();
+      boneBrothMat.dispose();
     };
   }, [
     potGeo,
@@ -428,11 +455,29 @@ export function HotPotModel({
     bokChoyLeafGeo,
     beefSpiralMeatGeo,
     beefSpiralFatGeo,
+    malaBrothMat,
+    boneBrothMat,
   ]);
 
-  // Smooth simmering bubbles + staggered bobbing spices and toppings
+  const isPotHi = highlightedPart === 'pot';
+  const isMalaHi = highlightedPart === 'mala-broth';
+  const isBoneHi = highlightedPart === 'bone-broth';
+  const isSpicesHi = highlightedPart === 'spices';
+  const isToppingsHi = highlightedPart === 'toppings';
+
+  useEffect(() => {
+    malaBrothMat.uniforms.uBaseColor.value.copy(isMalaHi ? MALA_HI_COLOR : MALA_BASE_COLOR);
+  }, [isMalaHi, malaBrothMat]);
+
+  useEffect(() => {
+    boneBrothMat.uniforms.uBaseColor.value.copy(isBoneHi ? BONE_HI_COLOR : BONE_BASE_COLOR);
+  }, [isBoneHi, boneBrothMat]);
+
+  // Smooth GLSL broth flow + simmering bubbles + staggered bobbing spices and toppings
   useFrame((state) => {
     const t = state.clock.elapsedTime;
+    malaBrothMat.uniforms.uTime.value = t;
+    boneBrothMat.uniforms.uTime.value = t;
 
     // Animated simmering Mala oil bubbles
     MALA_BUBBLES.forEach((b, i) => {
@@ -476,12 +521,6 @@ export function HotPotModel({
     });
   });
 
-  const isPotHi = highlightedPart === 'pot';
-  const isMalaHi = highlightedPart === 'mala-broth';
-  const isBoneHi = highlightedPart === 'bone-broth';
-  const isSpicesHi = highlightedPart === 'spices';
-  const isToppingsHi = highlightedPart === 'toppings';
-
   return (
     <group>
       {/* Layer 1: Brushed Stainless-Steel Divided Yin-Yang Pot */}
@@ -494,14 +533,19 @@ export function HotPotModel({
         onSelect={handleSelect}
       >
         <group>
-          {/* Main round metallic pot body */}
+          {/* Main round metallic pot body with brushed stainless sheen contrast */}
           <mesh geometry={potGeo} castShadow receiveShadow>
-            <meshStandardMaterial
-              color="#C8CED6"
-              metalness={0.84}
-              roughness={0.24}
+            <meshPhysicalMaterial
+              color="#CBD1D9"
+              bumpMap={brushedSteelBump}
+              bumpScale={0.008}
+              roughnessMap={brushedSteelBump}
+              metalness={0.88}
+              roughness={0.28}
+              clearcoat={0.22}
+              clearcoatRoughness={0.35}
               emissive="#4A3528"
-              emissiveIntensity={isPotHi ? 0.35 : 0}
+              emissiveIntensity={isPotHi ? 0.32 : 0}
             />
           </mesh>
 
@@ -509,22 +553,29 @@ export function HotPotModel({
           <mesh position={[0, -0.45, 0]} rotation={[Math.PI / 2, 0, 0]}>
             <torusGeometry args={[0.96, 0.035, 12, 56]} />
             <meshStandardMaterial
-              color="#585E68"
-              metalness={0.78}
-              roughness={0.34}
+              color="#525862"
+              bumpMap={brushedSteelBump}
+              bumpScale={0.006}
+              metalness={0.82}
+              roughness={0.36}
               emissive="#4A3528"
-              emissiveIntensity={isPotHi ? 0.3 : 0}
+              emissiveIntensity={isPotHi ? 0.28 : 0}
             />
           </mesh>
 
           {/* Authentic S-Curve Metallic Divider Wall */}
           <mesh geometry={dividerGeo} castShadow receiveShadow>
-            <meshStandardMaterial
-              color="#D2D8E0"
-              metalness={0.86}
-              roughness={0.22}
+            <meshPhysicalMaterial
+              color="#D5DBE3"
+              bumpMap={brushedSteelBump}
+              bumpScale={0.006}
+              roughnessMap={brushedSteelBump}
+              metalness={0.9}
+              roughness={0.24}
+              clearcoat={0.24}
+              clearcoatRoughness={0.3}
               emissive="#5A3A28"
-              emissiveIntensity={isPotHi ? 0.38 : 0}
+              emissiveIntensity={isPotHi ? 0.34 : 0}
             />
           </mesh>
 
@@ -537,32 +588,37 @@ export function HotPotModel({
             >
               <mesh geometry={handleGeo} castShadow>
                 <meshStandardMaterial
-                  color="#BCC3CC"
-                  metalness={0.85}
+                  color="#BFC6D0"
+                  bumpMap={brushedSteelBump}
+                  bumpScale={0.006}
+                  metalness={0.88}
                   roughness={0.24}
                   emissive="#4A3528"
-                  emissiveIntensity={isPotHi ? 0.35 : 0}
+                  emissiveIntensity={isPotHi ? 0.32 : 0}
                 />
               </mesh>
-              {/* Dark heat-resistant grip sleeve on outer handle curve */}
+              {/* Textured matte heat-resistant silicone grip sleeve */}
               <mesh position={[0.31, 0.12, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
                 <capsuleGeometry args={[0.046, 0.18, 8, 12]} />
                 <meshStandardMaterial
                   color="#2A2827"
-                  roughness={0.72}
+                  bumpMap={gripSlateTex.bumpMap}
+                  bumpScale={0.015}
+                  roughnessMap={gripSlateTex.roughnessMap}
+                  roughness={0.85}
                   emissive="#4A2418"
-                  emissiveIntensity={isPotHi ? 0.35 : 0}
+                  emissiveIntensity={isPotHi ? 0.32 : 0}
                 />
               </mesh>
-              {/* Riveted mounting bracket + 2 metal rivets */}
+              {/* Riveted mounting bracket + 2 polished steel rivets */}
               <mesh position={[0.02, 0.04, 0]} rotation={[0, 0, Math.PI / 2]} castShadow>
                 <cylinderGeometry args={[0.055, 0.055, 0.04, 16]} />
-                <meshStandardMaterial color="#AEB6C0" metalness={0.86} roughness={0.26} />
+                <meshStandardMaterial color="#AEB6C0" metalness={0.88} roughness={0.26} />
               </mesh>
               {[-0.22, 0.22].map((rz, rIdx) => (
                 <mesh key={`rivet-${rIdx}`} position={[0.03, 0.04, rz]}>
                   <sphereGeometry args={[0.022, 10, 10]} />
-                  <meshStandardMaterial color="#E2E7EE" metalness={0.9} roughness={0.18} />
+                  <meshStandardMaterial color="#E6EBF2" metalness={0.94} roughness={0.14} />
                 </mesh>
               ))}
             </group>
@@ -570,7 +626,7 @@ export function HotPotModel({
         </group>
       </FoodLayer>
 
-      {/* Layer 2: Sichuan Mala Chili Broth (Left S-Curve Half) */}
+      {/* Layer 2: Animated GLSL Sichuan Mala Chili Broth (Left S-Curve Half) */}
       <FoodLayer
         partId="mala-broth"
         label="Sichuan Mala Chili Broth"
@@ -581,17 +637,7 @@ export function HotPotModel({
         onSelect={handleSelect}
       >
         <group>
-          <mesh geometry={malaBrothGeo} receiveShadow>
-            <meshPhysicalMaterial
-              color="#B81D13"
-              roughness={0.1}
-              metalness={0.02}
-              clearcoat={1}
-              clearcoatRoughness={0.06}
-              emissive="#9E160A"
-              emissiveIntensity={isMalaHi ? 0.42 : 0.08}
-            />
-          </mesh>
+          <mesh geometry={malaBrothGeo} material={malaBrothMat} receiveShadow />
 
           {/* Animated simmering chili-oil bubbles */}
           {MALA_BUBBLES.map((b, idx) => (
@@ -604,21 +650,21 @@ export function HotPotModel({
             >
               <sphereGeometry args={[b.baseR, 14, 10]} />
               <meshPhysicalMaterial
-                color="#E34222"
-                roughness={0.08}
+                color="#E54322"
+                roughness={0.07}
                 clearcoat={1}
                 clearcoatRoughness={0.04}
                 transparent
                 opacity={0.88}
                 emissive="#B8250A"
-                emissiveIntensity={isMalaHi ? 0.45 : 0.12}
+                emissiveIntensity={isMalaHi ? 0.42 : 0.1}
               />
             </mesh>
           ))}
         </group>
       </FoodLayer>
 
-      {/* Layer 3: Creamy Pork Bone Broth (Right S-Curve Half) */}
+      {/* Layer 3: Animated GLSL Creamy Pork Bone Broth (Right S-Curve Half) */}
       <FoodLayer
         partId="bone-broth"
         label="Creamy Pork Bone Broth"
@@ -629,17 +675,7 @@ export function HotPotModel({
         onSelect={handleSelect}
       >
         <group>
-          <mesh geometry={boneBrothGeo} receiveShadow>
-            <meshPhysicalMaterial
-              color="#F2E6CE"
-              roughness={0.2}
-              metalness={0.0}
-              clearcoat={0.65}
-              clearcoatRoughness={0.16}
-              emissive="#7A5F36"
-              emissiveIntensity={isBoneHi ? 0.32 : 0.04}
-            />
-          </mesh>
+          <mesh geometry={boneBrothGeo} material={boneBrothMat} receiveShadow />
 
           {/* Gentle creamy simmering bubbles */}
           {BONE_BUBBLES.map((b, idx) => (
@@ -653,31 +689,36 @@ export function HotPotModel({
               <sphereGeometry args={[b.baseR, 12, 10]} />
               <meshPhysicalMaterial
                 color="#FFF9EC"
-                roughness={0.14}
-                clearcoat={0.85}
+                roughness={0.12}
+                clearcoat={0.88}
                 transparent
-                opacity={0.85}
+                opacity={0.86}
                 emissive="#7A5F36"
-                emissiveIntensity={isBoneHi ? 0.3 : 0}
+                emissiveIntensity={isBoneHi ? 0.26 : 0}
               />
             </mesh>
           ))}
 
-          {/* Red goji berries & sliced ginger coin infusing in the creamy bone broth */}
+          {/* Red goji berries infusing in the creamy bone broth */}
           {[
             [0.84, 0.122, -0.18] as [number, number, number],
             [0.14, 0.122, 0.82] as [number, number, number],
             [0.72, 0.122, 0.44] as [number, number, number],
             [-0.22, 0.122, 0.72] as [number, number, number],
           ].map((pos, idx) => (
-            <mesh key={`goji-${idx}`} position={pos} rotation={[0.1, idx * 1.1, 0.2]} scale={[1.5, 0.75, 0.8]}>
+            <mesh
+              key={`goji-${idx}`}
+              position={pos}
+              rotation={[0.1, idx * 1.1, 0.2]}
+              scale={[1.5, 0.75, 0.8]}
+            >
               <sphereGeometry args={[0.028, 10, 10]} />
               <meshPhysicalMaterial
                 color="#C82F22"
-                roughness={0.24}
-                clearcoat={0.65}
+                roughness={0.22}
+                clearcoat={0.72}
                 emissive="#7A180E"
-                emissiveIntensity={isBoneHi ? 0.35 : 0}
+                emissiveIntensity={isBoneHi ? 0.32 : 0}
               />
             </mesh>
           ))}
@@ -709,17 +750,18 @@ export function HotPotModel({
               <mesh geometry={chiliPodGeo} castShadow>
                 <meshPhysicalMaterial
                   color={idx % 2 === 0 ? '#9E140B' : '#B51A0F'}
-                  roughness={0.24}
-                  clearcoat={0.75}
-                  clearcoatRoughness={0.14}
+                  bumpMap={organicBump}
+                  bumpScale={0.018}
+                  roughness={0.2}
+                  clearcoat={0.85}
+                  clearcoatRoughness={0.12}
                   emissive="#8A1008"
-                  emissiveIntensity={isSpicesHi ? 0.42 : 0}
+                  emissiveIntensity={isSpicesHi ? 0.38 : 0}
                 />
               </mesh>
-              {/* Tiny dried brown calyx stem */}
               <mesh position={[-0.2, 0.005, -0.06]} rotation={[0.2, 0.3, 1.2]}>
                 <cylinderGeometry args={[0.008, 0.014, 0.06, 6]} />
-                <meshStandardMaterial color="#5E462C" roughness={0.78} />
+                <meshStandardMaterial color="#5E462C" roughness={0.82} />
               </mesh>
             </group>
           ))}
@@ -729,11 +771,14 @@ export function HotPotModel({
             {PEPPERCORNS.map((pos, idx) => (
               <mesh key={`pcorn-${idx}`} position={pos} castShadow>
                 <dodecahedronGeometry args={[0.023, 1]} />
-                <meshStandardMaterial
+                <meshPhysicalMaterial
                   color={idx % 3 === 0 ? '#4D2618' : '#3D1E14'}
-                  roughness={0.48}
+                  bumpMap={organicBump}
+                  bumpScale={0.016}
+                  roughness={0.44}
+                  clearcoat={0.45}
                   emissive="#5A2210"
-                  emissiveIntensity={isSpicesHi ? 0.45 : 0}
+                  emissiveIntensity={isSpicesHi ? 0.42 : 0}
                 />
               </mesh>
             ))}
@@ -748,9 +793,11 @@ export function HotPotModel({
                   <sphereGeometry args={[0.042, 10, 10]} />
                   <meshStandardMaterial
                     color="#4E2A14"
-                    roughness={0.55}
+                    bumpMap={organicBump}
+                    bumpScale={0.02}
+                    roughness={0.58}
                     emissive="#5A280C"
-                    emissiveIntensity={isSpicesHi ? 0.42 : 0}
+                    emissiveIntensity={isSpicesHi ? 0.38 : 0}
                   />
                 </mesh>
                 {Array.from({ length: 8 }).map((_, pIdx) => (
@@ -768,9 +815,11 @@ export function HotPotModel({
                     <coneGeometry args={[0.038, 0.13, 6]} />
                     <meshStandardMaterial
                       color="#4E2A14"
-                      roughness={0.55}
+                      bumpMap={organicBump}
+                      bumpScale={0.02}
+                      roughness={0.58}
                       emissive="#5A280C"
-                      emissiveIntensity={isSpicesHi ? 0.42 : 0}
+                      emissiveIntensity={isSpicesHi ? 0.38 : 0}
                     />
                   </mesh>
                 ))}
@@ -784,20 +833,20 @@ export function HotPotModel({
                   <cylinderGeometry args={[0.032, 0.032, 0.11, 12]} />
                   <meshPhysicalMaterial
                     color="#EDF2E1"
-                    roughness={0.34}
-                    clearcoat={0.4}
+                    roughness={0.3}
+                    clearcoat={0.48}
                     emissive="#4A5A32"
-                    emissiveIntensity={isSpicesHi ? 0.3 : 0}
+                    emissiveIntensity={isSpicesHi ? 0.28 : 0}
                   />
                 </mesh>
                 <mesh position={[0, 0.055, 0]} castShadow>
                   <cylinderGeometry args={[0.03, 0.032, 0.11, 12]} />
                   <meshPhysicalMaterial
                     color="#5B9B3A"
-                    roughness={0.36}
-                    clearcoat={0.35}
+                    roughness={0.34}
+                    clearcoat={0.4}
                     emissive="#245212"
-                    emissiveIntensity={isSpicesHi ? 0.35 : 0}
+                    emissiveIntensity={isSpicesHi ? 0.32 : 0}
                   />
                 </mesh>
               </group>
@@ -832,21 +881,24 @@ export function HotPotModel({
                 <mesh geometry={lotusGeo} castShadow receiveShadow>
                   <meshPhysicalMaterial
                     color="#EFE0C6"
-                    roughness={0.32}
-                    clearcoat={0.35}
-                    clearcoatRoughness={0.22}
+                    bumpMap={organicBump}
+                    bumpScale={0.012}
+                    roughness={0.3}
+                    clearcoat={0.44}
+                    clearcoatRoughness={0.2}
                     emissive="#6E542C"
-                    emissiveIntensity={isToppingsHi ? 0.3 : 0}
+                    emissiveIntensity={isToppingsHi ? 0.28 : 0}
                   />
                 </mesh>
-                {/* Warm peeled-skin rim ring */}
                 <mesh rotation={[Math.PI / 2, 0, 0]}>
                   <torusGeometry args={[0.252, 0.018, 10, 32]} />
                   <meshStandardMaterial
                     color="#D4B588"
-                    roughness={0.44}
+                    bumpMap={organicBump}
+                    bumpScale={0.016}
+                    roughness={0.48}
                     emissive="#6E4E24"
-                    emissiveIntensity={isToppingsHi ? 0.3 : 0}
+                    emissiveIntensity={isToppingsHi ? 0.28 : 0}
                   />
                 </mesh>
               </group>
@@ -865,18 +917,16 @@ export function HotPotModel({
               }}
             >
               <group position={bok.pos} rotation={bok.rot} scale={bok.s}>
-                {/* Bulbous pale jade stem base */}
                 <mesh position={[0, 0.02, 0.12]} rotation={[Math.PI / 2 - 0.15, 0, 0]} scale={[1.1, 1.3, 0.7]} castShadow>
                   <capsuleGeometry args={[0.055, 0.12, 8, 12]} />
                   <meshPhysicalMaterial
                     color="#CBE6A8"
-                    roughness={0.28}
-                    clearcoat={0.45}
+                    roughness={0.24}
+                    clearcoat={0.55}
                     emissive="#3A5E1E"
-                    emissiveIntensity={isToppingsHi ? 0.32 : 0}
+                    emissiveIntensity={isToppingsHi ? 0.3 : 0}
                   />
                 </mesh>
-                {/* 3 fanned dark emerald ruffled leaves */}
                 {[-0.45, 0, 0.45].map((ang, lIdx) => (
                   <mesh
                     key={`b-leaf-${lIdx}`}
@@ -888,10 +938,12 @@ export function HotPotModel({
                   >
                     <meshPhysicalMaterial
                       color={lIdx === 1 ? '#2F6E31' : '#3F873D'}
-                      roughness={0.34}
-                      clearcoat={0.35}
+                      bumpMap={organicBump}
+                      bumpScale={0.016}
+                      roughness={0.32}
+                      clearcoat={0.44}
                       emissive="#184A16"
-                      emissiveIntensity={isToppingsHi ? 0.38 : 0}
+                      emissiveIntensity={isToppingsHi ? 0.34 : 0}
                     />
                   </mesh>
                 ))}
@@ -906,17 +958,15 @@ export function HotPotModel({
             }}
           >
             <group position={[0.14, 0.14, 0.68]} rotation={[0.15, 0.7, 0.12]}>
-              {/* Tied root base */}
               <mesh position={[0, 0, 0.14]} rotation={[Math.PI / 2, 0, 0]}>
                 <cylinderGeometry args={[0.068, 0.058, 0.08, 12]} />
                 <meshStandardMaterial
                   color="#EFE6D2"
                   roughness={0.52}
                   emissive="#635434"
-                  emissiveIntensity={isToppingsHi ? 0.28 : 0}
+                  emissiveIntensity={isToppingsHi ? 0.25 : 0}
                 />
               </mesh>
-              {/* 12 slender ivory stems with tiny rounded button caps */}
               {Array.from({ length: 12 }).map((_, mIdx) => {
                 const spreadX = ((mIdx % 4) - 1.5) * 0.036;
                 const spreadY = (Math.floor(mIdx / 4) - 1) * 0.028;
@@ -929,14 +979,14 @@ export function HotPotModel({
                       castShadow
                     >
                       <cylinderGeometry args={[0.011, 0.013, len, 8]} />
-                      <meshStandardMaterial
+                      <meshPhysicalMaterial
                         color="#FAF5EA"
-                        roughness={0.38}
+                        roughness={0.32}
+                        clearcoat={0.35}
                         emissive="#635434"
-                        emissiveIntensity={isToppingsHi ? 0.25 : 0}
+                        emissiveIntensity={isToppingsHi ? 0.24 : 0}
                       />
                     </mesh>
-                    {/* Adorable tiny mushroom button cap */}
                     <mesh
                       position={[spreadX * 1.05, spreadY * 0.65 + 0.01, -len]}
                       scale={[1.0, 0.75, 1.0]}
@@ -945,10 +995,10 @@ export function HotPotModel({
                       <sphereGeometry args={[0.028, 10, 10]} />
                       <meshPhysicalMaterial
                         color="#FFFDF6"
-                        roughness={0.28}
-                        clearcoat={0.35}
+                        roughness={0.22}
+                        clearcoat={0.48}
                         emissive="#635434"
-                        emissiveIntensity={isToppingsHi ? 0.28 : 0}
+                        emissiveIntensity={isToppingsHi ? 0.26 : 0}
                       />
                     </mesh>
                   </group>
@@ -970,25 +1020,25 @@ export function HotPotModel({
               }}
             >
               <group position={roll.pos} rotation={roll.rot} scale={roll.s}>
-                {/* Rich ruby-marbled beef spiral */}
                 <mesh geometry={beefSpiralMeatGeo} castShadow receiveShadow>
                   <meshPhysicalMaterial
-                    color="#A63A3A"
-                    roughness={0.3}
-                    clearcoat={0.42}
-                    clearcoatRoughness={0.2}
+                    color="#A43838"
+                    bumpMap={organicBump}
+                    bumpScale={0.022}
+                    roughness={0.28}
+                    clearcoat={0.52}
+                    clearcoatRoughness={0.18}
                     emissive="#7A1C1C"
-                    emissiveIntensity={isToppingsHi ? 0.35 : 0}
+                    emissiveIntensity={isToppingsHi ? 0.32 : 0}
                   />
                 </mesh>
-                {/* Creamy marbled fat spiral ribbon */}
                 <mesh geometry={beefSpiralFatGeo} castShadow>
                   <meshPhysicalMaterial
                     color="#F5E2DA"
-                    roughness={0.32}
-                    clearcoat={0.35}
+                    roughness={0.28}
+                    clearcoat={0.44}
                     emissive="#6E4A3E"
-                    emissiveIntensity={isToppingsHi ? 0.28 : 0}
+                    emissiveIntensity={isToppingsHi ? 0.25 : 0}
                   />
                 </mesh>
               </group>

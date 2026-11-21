@@ -1,9 +1,15 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { FoodModelProps } from '@/types/dish';
+import {
+  createBrothShaderMaterial,
+  getOrganicNoiseBump,
+  getPankoCrustTextures,
+  getSlateTextures,
+} from '@/lib/proceduralTextures';
 import { FoodLayer } from './FoodLayer';
 
 interface TofuCubeSpec {
@@ -28,7 +34,6 @@ interface ScallionRingSpec {
 
 // 16 plump, tumbled silken tofu cubes naturally mounded in the crimson chili oil
 const TOFU_CUBES: TofuCubeSpec[] = [
-  // Lower/outer ring partially submerged in the doubanjiang sauce
   { pos: [-0.62, 0.04, 0.34], rot: [0.18, 0.42, -0.14], scale: [1.0, 0.94, 0.98] },
   { pos: [-0.66, 0.05, -0.24], rot: [-0.12, 1.15, 0.2], scale: [0.96, 0.96, 1.02] },
   { pos: [-0.14, 0.04, 0.66], rot: [0.22, -0.35, 0.12], scale: [1.02, 0.92, 0.96] },
@@ -36,14 +41,12 @@ const TOFU_CUBES: TofuCubeSpec[] = [
   { pos: [0.7, 0.03, -0.04], rot: [0.14, 1.48, 0.16], scale: [0.95, 0.92, 0.96] },
   { pos: [0.48, 0.05, -0.56], rot: [-0.2, 0.28, -0.12], scale: [1.0, 0.94, 0.98] },
   { pos: [-0.14, 0.04, -0.68], rot: [0.16, -0.82, 0.18], scale: [0.98, 0.92, 1.0] },
-  // Middle tier nestling together
   { pos: [-0.34, 0.12, 0.22], rot: [-0.22, 0.62, 0.14], scale: [1.04, 0.98, 1.02] },
   { pos: [0.26, 0.11, 0.24], rot: [0.18, -0.52, -0.2], scale: [1.0, 0.96, 1.02] },
   { pos: [0.32, 0.12, -0.24], rot: [-0.14, 1.08, 0.16], scale: [1.02, 0.98, 0.96] },
   { pos: [-0.32, 0.13, -0.28], rot: [0.24, 0.15, -0.18], scale: [0.98, 0.95, 1.0] },
   { pos: [0.02, 0.09, -0.36], rot: [-0.18, 0.92, 0.22], scale: [0.94, 0.94, 0.98] },
   { pos: [0.04, 0.1, 0.36], rot: [0.14, -0.24, -0.15], scale: [0.96, 0.94, 0.96] },
-  // Crown cubes peeking proudly above the crimson sauce
   { pos: [-0.12, 0.21, 0.04], rot: [0.26, 0.48, -0.22], scale: [1.04, 0.98, 1.02] },
   { pos: [0.18, 0.19, -0.02], rot: [-0.24, -0.7, 0.2], scale: [0.98, 0.94, 1.0] },
   { pos: [-0.04, 0.18, -0.22], rot: [0.16, 1.25, 0.18], scale: [0.94, 0.92, 0.96] },
@@ -162,71 +165,50 @@ const PEPPERCORN_DUST: [number, number, number][] = [
   [-0.36, 0.222, -0.31], [0.06, 0.205, 0.34], [0.0, 0.202, 0.39],
 ];
 
-function createClayTexture(): THREE.CanvasTexture | null {
-  if (typeof document === 'undefined') return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-
-  ctx.fillStyle = '#262220';
-  ctx.fillRect(0, 0, 128, 128);
-
-  // Subtle hand-thrown wheel lines
-  for (let y = 0; y < 128; y += 4) {
-    ctx.fillStyle = y % 8 === 0 ? 'rgba(58, 48, 42, 0.25)' : 'rgba(22, 18, 16, 0.22)';
-    ctx.fillRect(0, y, 128, 2);
-  }
-
-  let seed = 137;
-  const rand = () => {
-    seed = (seed * 16807) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-
-  for (let i = 0; i < 240; i++) {
-    ctx.fillStyle = i % 2 === 0 ? 'rgba(92, 74, 62, 0.24)' : 'rgba(18, 15, 14, 0.35)';
-    const x = rand() * 128;
-    const y = rand() * 128;
-    const r = 0.6 + rand() * 1.3;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3, 2);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
+const MAPO_SAUCE_BASE_COLOR = new THREE.Color('#8B150A');
+const MAPO_SAUCE_HI_COLOR = new THREE.Color('#BD2614');
 
 export function MapoTofuModel({
   exploded,
   highlightedPart,
   onSelectPart,
 }: FoodModelProps) {
-  const sauceMatRef = useRef<THREE.MeshPhysicalMaterial>(null);
-
   const handleSelect = (partId: string) => {
     onSelectPart(highlightedPart === partId ? null : partId);
   };
+
+  // Shared cached procedural PBR textures (do NOT dispose cached singletons)
+  const slateTex = useMemo(() => getSlateTextures(), []);
+  const tofuBump = useMemo(() => getOrganicNoiseBump(613, 16), []);
+  const porkCrustTex = useMemo(() => getPankoCrustTextures(), []);
+  const scallionBump = useMemo(() => getOrganicNoiseBump(811, 14), []);
+
+  // Per-instance animated GLSL doubanjiang chili-oil shader (disposed cleanly on unmount)
+  const sauceShaderMat = useMemo(
+    () =>
+      createBrothShaderMaterial({
+        baseColor: '#8B150A',
+        oilColor: '#E53517',
+        sheenColor: '#FFAA66',
+        isSpicy: true,
+        opacity: 0.96,
+      }),
+    []
+  );
 
   // Hand-thrown dark charcoal/obsidian stoneware clay bowl LatheGeometry
   const bowlGeo = useMemo(() => {
     const pts = [
       new THREE.Vector2(0.0, -0.47),
       new THREE.Vector2(0.56, -0.47),
-      new THREE.Vector2(0.61, -0.51), // tactile stoneware foot ring
+      new THREE.Vector2(0.61, -0.51),
       new THREE.Vector2(0.7, -0.51),
       new THREE.Vector2(0.74, -0.44),
       new THREE.Vector2(0.95, -0.32),
       new THREE.Vector2(1.13, -0.14),
       new THREE.Vector2(1.24, 0.04),
       new THREE.Vector2(1.3, 0.2),
-      new THREE.Vector2(1.31, 0.245), // slightly organic hand-thrown rim
+      new THREE.Vector2(1.31, 0.245),
       new THREE.Vector2(1.24, 0.25),
       new THREE.Vector2(1.19, 0.19),
       new THREE.Vector2(1.08, -0.02),
@@ -252,7 +234,6 @@ export function MapoTofuModel({
       new THREE.Vector2(0.0, 0.125),
     ];
     const geo = new THREE.LatheGeometry(pts, 56);
-    // Add subtle organic oil surface undulation
     const pos = geo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const x = pos.getX(i);
@@ -295,23 +276,14 @@ export function MapoTofuModel({
     return geo;
   }, []);
 
-  const clayTexture = useMemo(() => createClayTexture(), []);
-
   useEffect(() => {
     return () => {
       bowlGeo.dispose();
       sauceGeo.dispose();
       tofuCubeGeo.dispose();
-      clayTexture?.dispose();
+      sauceShaderMat.dispose();
     };
-  }, [bowlGeo, sauceGeo, tofuCubeGeo, clayTexture]);
-
-  useFrame((state) => {
-    if (sauceMatRef.current) {
-      const t = state.clock.elapsedTime;
-      sauceMatRef.current.clearcoatRoughness = 0.075 + Math.sin(t * 1.5) * 0.018;
-    }
-  });
+  }, [bowlGeo, sauceGeo, tofuCubeGeo, sauceShaderMat]);
 
   const isBowlHi = highlightedPart === 'bowl';
   const isSauceHi = highlightedPart === 'sauce';
@@ -319,9 +291,19 @@ export function MapoTofuModel({
   const isPorkHi = highlightedPart === 'pork';
   const isScallionsHi = highlightedPart === 'scallions';
 
+  useEffect(() => {
+    sauceShaderMat.uniforms.uBaseColor.value.copy(
+      isSauceHi ? MAPO_SAUCE_HI_COLOR : MAPO_SAUCE_BASE_COLOR
+    );
+  }, [isSauceHi, sauceShaderMat]);
+
+  useFrame((state) => {
+    sauceShaderMat.uniforms.uTime.value = state.clock.elapsedTime;
+  });
+
   return (
     <group>
-      {/* Layer 1: Hand-Thrown Dark Clay Stoneware Bowl */}
+      {/* Layer 1: Hand-Thrown Unglazed Dark Stoneware Clay Bowl */}
       <FoodLayer
         partId="bowl"
         label="Dark Clay Bowl"
@@ -333,23 +315,30 @@ export function MapoTofuModel({
         <group>
           <mesh geometry={bowlGeo} castShadow receiveShadow>
             <meshStandardMaterial
-              color="#262220"
-              map={clayTexture ?? undefined}
-              roughness={0.82}
-              metalness={0.04}
+              color="#7A706A"
+              map={slateTex.map}
+              bumpMap={slateTex.bumpMap}
+              bumpScale={0.034}
+              roughnessMap={slateTex.roughnessMap}
+              roughness={0.94}
+              metalness={0.05}
               emissive="#4A3022"
-              emissiveIntensity={isBowlHi ? 0.35 : 0}
+              emissiveIntensity={isBowlHi ? 0.32 : 0}
             />
           </mesh>
 
-          {/* Subtle warm unglazed earthy clay lip rim */}
+          {/* Subtle warm kiln-sheen lip rim */}
           <mesh position={[0, 0.246, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
             <torusGeometry args={[1.275, 0.034, 14, 64]} />
-            <meshStandardMaterial
-              color="#4B392E"
-              roughness={0.78}
+            <meshPhysicalMaterial
+              color="#544033"
+              bumpMap={slateTex.bumpMap}
+              bumpScale={0.022}
+              roughness={0.62}
+              clearcoat={0.28}
+              clearcoatRoughness={0.42}
               emissive="#6A3C24"
-              emissiveIntensity={isBowlHi ? 0.38 : 0}
+              emissiveIntensity={isBowlHi ? 0.34 : 0}
             />
           </mesh>
 
@@ -357,16 +346,18 @@ export function MapoTofuModel({
           <mesh position={[0, 0.02, 0]} rotation={[Math.PI / 2, 0, 0]}>
             <torusGeometry args={[1.242, 0.014, 10, 56]} />
             <meshStandardMaterial
-              color="#342D29"
-              roughness={0.84}
+              color="#3A322E"
+              bumpMap={slateTex.bumpMap}
+              bumpScale={0.02}
+              roughness={0.86}
               emissive="#4A3022"
-              emissiveIntensity={isBowlHi ? 0.3 : 0}
+              emissiveIntensity={isBowlHi ? 0.28 : 0}
             />
           </mesh>
         </group>
       </FoodLayer>
 
-      {/* Layer 2: Mirror-Glossy Doubanjiang Chili Oil Sauce */}
+      {/* Layer 2: Animated GLSL Mirror-Glossy Bubbling Doubanjiang Chili Oil */}
       <FoodLayer
         partId="sauce"
         label="Doubanjiang Chili Oil"
@@ -377,20 +368,9 @@ export function MapoTofuModel({
         onSelect={handleSelect}
       >
         <group>
-          <mesh geometry={sauceGeo} receiveShadow>
-            <meshPhysicalMaterial
-              ref={sauceMatRef}
-              color="#9E1B0E"
-              roughness={0.12}
-              metalness={0.02}
-              clearcoat={1}
-              clearcoatRoughness={0.08}
-              emissive="#8F1508"
-              emissiveIntensity={isSauceHi ? 0.42 : 0.06}
-            />
-          </mesh>
+          <mesh geometry={sauceGeo} material={sauceShaderMat} receiveShadow />
 
-          {/* Tiny glistening red chili oil droplets around the inner rim edge */}
+          {/* Tiny glistening red chili oil droplets clinging around the inner rim */}
           {EDGE_DROPLETS.map(([x, y, z, r], idx) => (
             <mesh
               key={`drop-${idx}`}
@@ -399,19 +379,19 @@ export function MapoTofuModel({
             >
               <sphereGeometry args={[r, 12, 10]} />
               <meshPhysicalMaterial
-                color="#C92412"
-                roughness={0.08}
+                color="#D42814"
+                roughness={0.06}
                 clearcoat={1}
-                clearcoatRoughness={0.05}
+                clearcoatRoughness={0.04}
                 emissive="#A81808"
-                emissiveIntensity={isSauceHi ? 0.45 : 0.08}
+                emissiveIntensity={isSauceHi ? 0.42 : 0.08}
               />
             </mesh>
           ))}
         </group>
       </FoodLayer>
 
-      {/* Layer 3: Plump Beveled White Silken Tofu Cubes */}
+      {/* Layer 3: Soft Subsurface-Feel Silken Tofu Cubes */}
       <FoodLayer
         partId="tofu"
         label="Silken Tofu Cubes"
@@ -434,12 +414,19 @@ export function MapoTofuModel({
             >
               <meshPhysicalMaterial
                 color={idx % 3 === 0 ? '#FFFDF8' : '#FBF7EF'}
-                roughness={0.22}
+                bumpMap={tofuBump}
+                bumpScale={0.006}
+                transmission={0.12}
+                thickness={0.4}
+                ior={1.36}
+                attenuationColor="#FFF1D8"
+                attenuationDistance={0.65}
+                roughness={0.14}
                 metalness={0.0}
-                clearcoat={0.55}
-                clearcoatRoughness={0.16}
+                clearcoat={0.65}
+                clearcoatRoughness={0.12}
                 emissive="#6A5038"
-                emissiveIntensity={isTofuHi ? 0.24 : 0}
+                emissiveIntensity={isTofuHi ? 0.22 : 0}
               />
             </mesh>
           ))}
@@ -450,18 +437,18 @@ export function MapoTofuModel({
               <sphereGeometry args={[r, 12, 10]} />
               <meshPhysicalMaterial
                 color="#A61D10"
-                roughness={0.1}
+                roughness={0.08}
                 clearcoat={1}
-                clearcoatRoughness={0.06}
+                clearcoatRoughness={0.05}
                 emissive="#8A1408"
-                emissiveIntensity={isTofuHi ? 0.35 : 0.04}
+                emissiveIntensity={isTofuHi ? 0.32 : 0.04}
               />
             </mesh>
           ))}
         </group>
       </FoodLayer>
 
-      {/* Layer 4: Crispy Caramelized Minced Pork & Fermented Black Beans */}
+      {/* Layer 4: High-Contrast Crispy Minced Pork & Glossy Fermented Black Beans */}
       <FoodLayer
         partId="pork"
         label="Crispy Minced Pork"
@@ -472,7 +459,7 @@ export function MapoTofuModel({
         onSelect={handleSelect}
       >
         <group>
-          {/* Caramelized savory minced pork crumbles */}
+          {/* Crispy matte caramelized pork crumbles topped with glistening chili-oil clearcoat */}
           {PORK_CRUMBLES.map((crumble, idx) => (
             <mesh
               key={`pork-${idx}`}
@@ -483,17 +470,20 @@ export function MapoTofuModel({
             >
               <dodecahedronGeometry args={[1, 1]} />
               <meshPhysicalMaterial
-                color={crumble.dark ? '#4A2518' : '#623320'}
-                roughness={0.4}
-                clearcoat={0.48}
-                clearcoatRoughness={0.22}
+                color={crumble.dark ? '#442014' : '#5D2E1B'}
+                bumpMap={porkCrustTex.bumpMap}
+                bumpScale={0.042}
+                roughnessMap={porkCrustTex.roughnessMap}
+                roughness={0.86}
+                clearcoat={0.62}
+                clearcoatRoughness={0.14}
                 emissive="#6E2810"
-                emissiveIntensity={isPorkHi ? 0.42 : 0}
+                emissiveIntensity={isPorkHi ? 0.38 : 0}
               />
             </mesh>
           ))}
 
-          {/* Fermented black beans (douchi) */}
+          {/* Mirror-glossy fermented black beans (douchi) */}
           {DOUCHI_BEANS.map(([x, y, z, rotY], idx) => (
             <mesh
               key={`douchi-${idx}`}
@@ -504,12 +494,12 @@ export function MapoTofuModel({
             >
               <sphereGeometry args={[1, 10, 10]} />
               <meshPhysicalMaterial
-                color="#1E1715"
-                roughness={0.2}
-                clearcoat={0.85}
-                clearcoatRoughness={0.12}
+                color="#191311"
+                roughness={0.14}
+                clearcoat={0.96}
+                clearcoatRoughness={0.08}
                 emissive="#4A2A1E"
-                emissiveIntensity={isPorkHi ? 0.45 : 0}
+                emissiveIntensity={isPorkHi ? 0.42 : 0}
               />
             </mesh>
           ))}
@@ -538,10 +528,12 @@ export function MapoTofuModel({
               <torusGeometry args={[ring.radius, 0.015, 10, 20]} />
               <meshPhysicalMaterial
                 color={ring.bright ? '#74C655' : '#4CA638'}
-                roughness={0.34}
-                clearcoat={0.35}
+                bumpMap={scallionBump}
+                bumpScale={0.008}
+                roughness={0.3}
+                clearcoat={0.44}
                 emissive="#245C14"
-                emissiveIntensity={isScallionsHi ? 0.4 : 0}
+                emissiveIntensity={isScallionsHi ? 0.36 : 0}
               />
             </mesh>
           ))}
@@ -552,9 +544,9 @@ export function MapoTofuModel({
               <dodecahedronGeometry args={[0.011, 0]} />
               <meshStandardMaterial
                 color={idx % 2 === 0 ? '#5C341E' : '#3E2012'}
-                roughness={0.68}
+                roughness={0.74}
                 emissive="#6A3418"
-                emissiveIntensity={isScallionsHi ? 0.42 : 0}
+                emissiveIntensity={isScallionsHi ? 0.38 : 0}
               />
             </mesh>
           ))}

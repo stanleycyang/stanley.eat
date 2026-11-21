@@ -5,8 +5,9 @@ import { useSearchParams } from 'next/navigation';
 import { RECIPES, getDishById } from '@/data/recipes';
 import type { DishId } from '@/types/dish';
 import { SceneStageLoader } from './SceneStageLoader';
-import { RecipePanel } from './RecipePanel';
+import { RecipePanel, type ScaleFactor } from './RecipePanel';
 import { DishDock } from './DishDock';
+import { CookModeModal } from './CookModeModal';
 
 function fallbackCopyText(text: string): boolean {
   try {
@@ -35,6 +36,13 @@ export function StanleyEatApp() {
   const [selectedPart, setSelectedPart] = useState<string | null>(null);
   const [hoveredPart, setHoveredPart] = useState<string | null>(null);
   const [shareCopied, setShareCopied] = useState(false);
+  const [cookModeOpen, setCookModeOpen] = useState(false);
+
+  // Lifted per-dish recipe progress so RecipePanel and CookModeModal stay in sync
+  const [scaleByDish, setScaleByDish] = useState<Partial<Record<DishId, ScaleFactor>>>({});
+  const [checkedByDish, setCheckedByDish] = useState<
+    Partial<Record<DishId, Record<string, boolean>>>
+  >({});
 
   const shareTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const recipeScrollRef = useRef<HTMLDivElement | null>(null);
@@ -46,6 +54,12 @@ export function StanleyEatApp() {
 
   const activeDish = RECIPES[activeDishIndex] ?? RECIPES[0];
   const highlightedPart = hoveredPart ?? selectedPart;
+
+  const activeScale: ScaleFactor = scaleByDish[activeDish.id] ?? 1;
+  const activeCheckedMap = useMemo(
+    () => checkedByDish[activeDish.id] ?? {},
+    [checkedByDish, activeDish.id]
+  );
 
   // Sync if the URL query param changes externally (e.g., browser navigation)
   useEffect(() => {
@@ -93,6 +107,39 @@ export function StanleyEatApp() {
     });
   }, []);
 
+  const handleChangeScale = useCallback(
+    (nextScale: ScaleFactor) => {
+      setScaleByDish((prev) => ({
+        ...prev,
+        [activeDish.id]: nextScale,
+      }));
+    },
+    [activeDish.id]
+  );
+
+  const handleToggleIngredient = useCallback(
+    (ingredientId: string) => {
+      setCheckedByDish((prev) => {
+        const currentDishMap = prev[activeDish.id] ?? {};
+        return {
+          ...prev,
+          [activeDish.id]: {
+            ...currentDishMap,
+            [ingredientId]: !currentDishMap[ingredientId],
+          },
+        };
+      });
+    },
+    [activeDish.id]
+  );
+
+  const handleResetChecked = useCallback(() => {
+    setCheckedByDish((prev) => ({
+      ...prev,
+      [activeDish.id]: {},
+    }));
+  }, [activeDish.id]);
+
   const handleShare = useCallback(async () => {
     if (typeof window === 'undefined') return;
     const shareUrl = `${window.location.origin}${window.location.pathname}?dish=${activeDish.id}`;
@@ -120,8 +167,18 @@ export function StanleyEatApp() {
     }
   }, [activeDish.id]);
 
-  // Keyboard shortcuts: Left/Right arrows switch dishes, E toggles Explode, Escape clears selection
+  const handleOpenCookMode = useCallback(() => {
+    setCookModeOpen(true);
+  }, []);
+
+  const handleCloseCookMode = useCallback(() => {
+    setCookModeOpen(false);
+  }, []);
+
+  // Keyboard shortcuts (paused while CookModeModal is open so Cook Mode owns navigation)
   useEffect(() => {
+    if (cookModeOpen) return;
+
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
 
@@ -147,6 +204,9 @@ export function StanleyEatApp() {
       } else if (event.key === 'e' || event.key === 'E') {
         event.preventDefault();
         handleToggleExplode();
+      } else if (event.key === 'c' || event.key === 'C') {
+        event.preventDefault();
+        setCookModeOpen(true);
       } else if (event.key === 'Escape') {
         setSelectedPart(null);
         setHoveredPart(null);
@@ -155,7 +215,7 @@ export function StanleyEatApp() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeDishIndex, handleSelectDish, handleToggleExplode]);
+  }, [cookModeOpen, activeDishIndex, handleSelectDish, handleToggleExplode]);
 
   const dishCounter = `${String(activeDishIndex + 1).padStart(2, '0')} / ${String(
     RECIPES.length
@@ -175,6 +235,7 @@ export function StanleyEatApp() {
             exploded={exploded}
             onToggleExplode={handleToggleExplode}
             highlightedPart={highlightedPart}
+            focusedPart={selectedPart}
             onSelectPart={handleSelectPart}
           />
         </div>
@@ -206,7 +267,7 @@ export function StanleyEatApp() {
             />
           </div>
           <p className="hidden xl:block font-mono text-[10.5px] tracking-[0.04em] text-[#8A7E71]/90">
-            ← → Switch Dish · E Explode Layers · Drag to Orbit
+            ← → Switch Dish · E Explode · C Cook Mode · Click Layer to Focus
           </p>
         </div>
       </section>
@@ -224,6 +285,12 @@ export function StanleyEatApp() {
           onSelectPart={handleSelectPart}
           onShare={handleShare}
           shareCopied={shareCopied}
+          scale={activeScale}
+          onChangeScale={handleChangeScale}
+          checkedMap={activeCheckedMap}
+          onToggleIngredient={handleToggleIngredient}
+          onResetChecked={handleResetChecked}
+          onOpenCookMode={handleOpenCookMode}
         />
       </main>
 
@@ -237,6 +304,18 @@ export function StanleyEatApp() {
           />
         </div>
       </div>
+
+      {/* Hands-Free Kitchen Counter Cook Mode Overlay */}
+      <CookModeModal
+        dish={activeDish}
+        isOpen={cookModeOpen}
+        onClose={handleCloseCookMode}
+        scale={activeScale}
+        onChangeScale={handleChangeScale}
+        checkedMap={activeCheckedMap}
+        onToggleIngredient={handleToggleIngredient}
+        onResetChecked={handleResetChecked}
+      />
     </div>
   );
 }

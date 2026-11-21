@@ -35,6 +35,10 @@ export function DishDock({ dishes, activeDishId, onSelectDish }: DishDockProps) 
       >
         {dishes.map((dish) => {
           const isActive = dish.id === activeDishId;
+          const tooltipText = dish.vibeTag
+            ? `${dish.name} — ${dish.vibeTag}`
+            : dish.name;
+
           return (
             <button
               key={dish.id}
@@ -43,6 +47,7 @@ export function DishDock({ dishes, activeDishId, onSelectDish }: DishDockProps) 
               }}
               type="button"
               role="tab"
+              title={tooltipText}
               aria-selected={isActive}
               aria-label={`${dish.name} (${dish.cuisine})`}
               onClick={() => onSelectDish(dish.id)}

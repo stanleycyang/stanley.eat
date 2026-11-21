@@ -4,6 +4,12 @@ import React, { useEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { FoodModelProps } from '@/types/dish';
+import {
+  getOrganicNoiseBump,
+  getPankoCrustTextures,
+  getRiceGrainTextures,
+  getStonewareTextures,
+} from '@/lib/proceduralTextures';
 import { FoodLayer } from './FoodLayer';
 
 interface RiceCluster {
@@ -39,7 +45,7 @@ const RICE_CLUSTERS: RiceCluster[] = [
   { pos: [-0.68, 0.1, 0.5], scale: [0.22, 0.13, 0.22], rot: [-0.18, -0.2, 0.06] },
   { pos: [-1.08, 0.02, -0.02], scale: [0.22, 0.13, 0.32], rot: [0.0, 0.05, 0.22] },
   { pos: [-0.34, 0.14, 0.02], scale: [0.24, 0.14, 0.3], rot: [0.04, -0.15, -0.2] },
-  // Fine bumpy surface rice-grain tufts for Studio Ghibli silhouette
+  // Fine bumpy surface rice-grain tufts for organic fluffy silhouette
   { pos: [-0.76, 0.27, -0.12], scale: [0.15, 0.09, 0.16], rot: [0.2, 0.6, 0.1] },
   { pos: [-0.56, 0.28, 0.14], scale: [0.16, 0.09, 0.15], rot: [-0.15, 0.3, -0.1] },
   { pos: [-0.66, 0.3, 0.02], scale: [0.14, 0.08, 0.14], rot: [0.1, -0.5, 0.08] },
@@ -126,80 +132,6 @@ const KATSU_CRUMBS: [number, number, number][] = [
   [-0.26, 0.1, 0.02],
 ];
 
-function createPankoTexture(): THREE.CanvasTexture | null {
-  if (typeof document === 'undefined') return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-
-  ctx.fillStyle = '#C87A28';
-  ctx.fillRect(0, 0, 128, 128);
-
-  // Deterministic pseudo-random crispy panko flakes
-  let seed = 42;
-  const rand = () => {
-    seed = (seed * 16807) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-
-  const palette = ['#DF9A44', '#B5631B', '#E8AE5B', '#9D4F14', '#D48631'];
-  for (let i = 0; i < 420; i++) {
-    ctx.fillStyle = palette[Math.floor(rand() * palette.length)];
-    const x = rand() * 128;
-    const y = rand() * 128;
-    const rx = 1.5 + rand() * 3.2;
-    const ry = 1.0 + rand() * 2.0;
-    const angle = rand() * Math.PI;
-    ctx.beginPath();
-    ctx.ellipse(x, y, rx, ry, angle, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(2, 2);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
-
-function createCeramicSpeckleTexture(): THREE.CanvasTexture | null {
-  if (typeof document === 'undefined') return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = 128;
-  canvas.height = 128;
-  const ctx = canvas.getContext('2d');
-  if (!ctx) return null;
-
-  ctx.fillStyle = '#F5EDE1';
-  ctx.fillRect(0, 0, 128, 128);
-
-  let seed = 91;
-  const rand = () => {
-    seed = (seed * 16807) % 2147483647;
-    return (seed - 1) / 2147483646;
-  };
-
-  for (let i = 0; i < 160; i++) {
-    ctx.fillStyle = i % 3 === 0 ? 'rgba(155, 134, 112, 0.28)' : 'rgba(205, 190, 170, 0.24)';
-    const x = rand() * 128;
-    const y = rand() * 128;
-    const r = 0.6 + rand() * 1.4;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const texture = new THREE.CanvasTexture(canvas);
-  texture.wrapS = THREE.RepeatWrapping;
-  texture.wrapT = THREE.RepeatWrapping;
-  texture.repeat.set(3, 3);
-  texture.colorSpace = THREE.SRGBColorSpace;
-  return texture;
-}
-
 export function CurryModel({
   exploded,
   highlightedPart,
@@ -210,6 +142,14 @@ export function CurryModel({
   const handleSelect = (partId: string) => {
     onSelectPart(highlightedPart === partId ? null : partId);
   };
+
+  // Shared cached procedural PBR textures (do NOT dispose cached singletons)
+  const stonewareTex = useMemo(() => getStonewareTextures(), []);
+  const riceTex = useMemo(() => getRiceGrainTextures(), []);
+  const pankoTex = useMemo(() => getPankoCrustTextures(), []);
+  const sauceBump = useMemo(() => getOrganicNoiseBump(73, 10), []);
+  const vegBump = useMemo(() => getOrganicNoiseBump(109, 12), []);
+  const porkBump = useMemo(() => getOrganicNoiseBump(211, 14), []);
 
   // Sculpted oval ceramic plate LatheGeometry (scaled along X for an organic oval)
   const plateGeo = useMemo(() => {
@@ -240,7 +180,6 @@ export function CurryModel({
     const rz = 1.04;
     const steps = 32;
 
-    // Right perimeter arc from top-left-ish (-0.18, +rz) clockwise through right (+rx, 0) to bottom (-0.18, -rz)
     const startAngle = Math.PI * 0.56;
     const endAngle = -Math.PI * 0.56;
     for (let i = 0; i <= steps; i++) {
@@ -252,9 +191,15 @@ export function CurryModel({
       else shape.lineTo(px, py);
     }
 
-    // Organic gentle curve hugging the rice mound's right flank back up to start
     shape.bezierCurveTo(-0.36, -0.52, -0.22, 0.0, -0.28, 0.52);
-    shape.bezierCurveTo(-0.3, 0.78, -0.24, 0.94, Math.cos(startAngle) * rx, Math.sin(startAngle) * rz);
+    shape.bezierCurveTo(
+      -0.3,
+      0.78,
+      -0.24,
+      0.94,
+      Math.cos(startAngle) * rx,
+      Math.sin(startAngle) * rz
+    );
 
     const geo = new THREE.ExtrudeGeometry(shape, {
       depth: 0.24,
@@ -359,9 +304,6 @@ export function CurryModel({
     return new THREE.TubeGeometry(curve, 44, 0.015, 8, false);
   }, []);
 
-  const pankoTexture = useMemo(() => createPankoTexture(), []);
-  const ceramicTexture = useMemo(() => createCeramicSpeckleTexture(), []);
-
   useEffect(() => {
     return () => {
       plateGeo.dispose();
@@ -371,8 +313,6 @@ export function CurryModel({
       katsuCrustGeo.dispose();
       katsuPorkGeo.dispose();
       drizzleGeo.dispose();
-      pankoTexture?.dispose();
-      ceramicTexture?.dispose();
     };
   }, [
     plateGeo,
@@ -382,14 +322,12 @@ export function CurryModel({
     katsuCrustGeo,
     katsuPorkGeo,
     drizzleGeo,
-    pankoTexture,
-    ceramicTexture,
   ]);
 
   useFrame((state) => {
     if (sauceRef.current) {
       const t = state.clock.elapsedTime;
-      sauceRef.current.clearcoatRoughness = 0.09 + Math.sin(t * 1.4) * 0.02;
+      sauceRef.current.clearcoatRoughness = 0.075 + Math.sin(t * 1.4) * 0.018;
     }
   });
 
@@ -401,7 +339,7 @@ export function CurryModel({
 
   return (
     <group>
-      {/* Layer 1: Sculpted Oval Ceramic Plate */}
+      {/* Layer 1: Sculpted Matte Speckled Stoneware Oval Plate */}
       <FoodLayer
         partId="plate"
         label="Oval Ceramic Plate"
@@ -413,30 +351,36 @@ export function CurryModel({
         <group scale={[1.35, 1, 1.0]}>
           <mesh geometry={plateGeo} castShadow receiveShadow>
             <meshPhysicalMaterial
-              color="#F5EDE1"
-              map={ceramicTexture ?? undefined}
-              roughness={0.44}
+              color="#F8F1E6"
+              map={stonewareTex.map}
+              bumpMap={stonewareTex.bumpMap}
+              bumpScale={0.016}
+              roughnessMap={stonewareTex.roughnessMap}
+              roughness={0.86}
               metalness={0.02}
-              clearcoat={0.32}
-              clearcoatRoughness={0.38}
+              clearcoat={0.26}
+              clearcoatRoughness={0.44}
               emissive="#4A2E1A"
-              emissiveIntensity={isPlateHi ? 0.22 : 0}
+              emissiveIntensity={isPlateHi ? 0.2 : 0}
             />
           </mesh>
           {/* Subtle hand-glazed toasted stoneware rim accent */}
           <mesh position={[0, -0.032, 0]} rotation={[Math.PI / 2, 0, 0]} receiveShadow>
             <torusGeometry args={[1.225, 0.022, 14, 72]} />
             <meshStandardMaterial
-              color="#D9C7B0"
-              roughness={0.55}
+              color="#D4BEA4"
+              bumpMap={stonewareTex.bumpMap}
+              bumpScale={0.018}
+              roughnessMap={stonewareTex.roughnessMap}
+              roughness={0.78}
               emissive="#5A331C"
-              emissiveIntensity={isPlateHi ? 0.25 : 0}
+              emissiveIntensity={isPlateHi ? 0.22 : 0}
             />
           </mesh>
         </group>
       </FoodLayer>
 
-      {/* Layer 2: Fluffy Koshihikari Rice Mound */}
+      {/* Layer 2: Pearlescent Textured Koshihikari Rice Mound */}
       <FoodLayer
         partId="rice"
         label="Koshihikari Rice"
@@ -447,24 +391,32 @@ export function CurryModel({
         onSelect={handleSelect}
       >
         <group>
-          {/* Main sculpted crescent-dome rice body */}
+          {/* Main sculpted crescent-dome rice body with individual grain stipple bump + starch crown specular */}
           <mesh
             position={[-0.68, -0.04, 0.0]}
             scale={[0.76, 0.42, 0.88]}
             castShadow
             receiveShadow
           >
-            <sphereGeometry args={[0.92, 32, 24]} />
-            <meshStandardMaterial
-              color="#FAF6EE"
-              roughness={0.72}
+            <sphereGeometry args={[0.92, 36, 28]} />
+            <meshPhysicalMaterial
+              color="#FCF8F0"
+              bumpMap={riceTex.bumpMap}
+              bumpScale={0.048}
+              roughnessMap={riceTex.roughnessMap}
+              roughness={0.88}
               metalness={0.0}
+              clearcoat={0.34}
+              clearcoatRoughness={0.3}
+              sheen={0.38}
+              sheenRoughness={0.55}
+              sheenColor="#FFFDF5"
               emissive="#5C4428"
-              emissiveIntensity={isRiceHi ? 0.22 : 0}
+              emissiveIntensity={isRiceHi ? 0.2 : 0}
             />
           </mesh>
 
-          {/* Overlapping soft rice tufts for organic fluffy silhouette */}
+          {/* Overlapping soft rice tufts with matching pearlescent grain PBR */}
           {RICE_CLUSTERS.map((c, idx) => (
             <mesh
               key={idx}
@@ -475,11 +427,18 @@ export function CurryModel({
               receiveShadow
             >
               <icosahedronGeometry args={[1, 2]} />
-              <meshStandardMaterial
-                color={idx % 3 === 0 ? '#FFFDF8' : '#F8F2E7'}
-                roughness={0.7}
+              <meshPhysicalMaterial
+                color={idx % 3 === 0 ? '#FFFDF8' : '#F9F3E8'}
+                bumpMap={riceTex.bumpMap}
+                bumpScale={0.042}
+                roughnessMap={riceTex.roughnessMap}
+                roughness={0.86}
+                clearcoat={0.32}
+                clearcoatRoughness={0.32}
+                sheen={0.35}
+                sheenColor="#FFFDF5"
                 emissive="#5C4428"
-                emissiveIntensity={isRiceHi ? 0.22 : 0}
+                emissiveIntensity={isRiceHi ? 0.2 : 0}
               />
             </mesh>
           ))}
@@ -494,17 +453,18 @@ export function CurryModel({
               castShadow
             >
               <sphereGeometry args={[1, 8, 8]} />
-              <meshStandardMaterial
+              <meshPhysicalMaterial
                 color="#1E1B18"
-                roughness={0.32}
-                metalness={0.05}
+                roughness={0.28}
+                clearcoat={0.5}
+                metalness={0.04}
               />
             </mesh>
           ))}
         </group>
       </FoodLayer>
 
-      {/* Layer 3: Glossy Golden Curry Roux */}
+      {/* Layer 3: Mirror-Glossy Deep Mahogany Golden Curry Roux */}
       <FoodLayer
         partId="sauce"
         label="Golden Curry Roux"
@@ -523,25 +483,43 @@ export function CurryModel({
           >
             <meshPhysicalMaterial
               ref={sauceRef}
-              color="#6B3510"
-              roughness={0.15}
+              color="#632D0C"
+              bumpMap={sauceBump}
+              bumpScale={0.012}
+              roughness={0.14}
               metalness={0.02}
-              clearcoat={0.92}
-              clearcoatRoughness={0.1}
+              clearcoat={1}
+              clearcoatRoughness={0.08}
+              ior={1.42}
               emissive="#7A2B08"
-              emissiveIntensity={isSauceHi ? 0.38 : 0}
+              emissiveIntensity={isSauceHi ? 0.35 : 0.04}
             />
           </mesh>
-          {/* Subtle glossy roux sheen waves */}
-          <mesh position={[0.76, -0.028, 0.05]} scale={[0.52, 0.04, 0.44]} receiveShadow>
-            <sphereGeometry args={[1, 24, 14]} />
+          {/* Subtle richer amber roux swell & depth variation */}
+          <mesh position={[0.74, -0.026, 0.06]} scale={[0.54, 0.042, 0.46]} receiveShadow>
+            <sphereGeometry args={[1, 28, 16]} />
             <meshPhysicalMaterial
-              color="#753B13"
-              roughness={0.13}
-              clearcoat={0.95}
-              clearcoatRoughness={0.08}
+              color="#763A12"
+              bumpMap={sauceBump}
+              bumpScale={0.01}
+              roughness={0.12}
+              clearcoat={1}
+              clearcoatRoughness={0.06}
               emissive="#7A2B08"
-              emissiveIntensity={isSauceHi ? 0.38 : 0}
+              emissiveIntensity={isSauceHi ? 0.35 : 0.04}
+            />
+          </mesh>
+          <mesh position={[0.38, -0.028, -0.32]} scale={[0.36, 0.032, 0.32]} receiveShadow>
+            <sphereGeometry args={[1, 20, 14]} />
+            <meshPhysicalMaterial
+              color="#552408"
+              bumpMap={sauceBump}
+              bumpScale={0.009}
+              roughness={0.13}
+              clearcoat={1}
+              clearcoatRoughness={0.07}
+              emissive="#7A2B08"
+              emissiveIntensity={isSauceHi ? 0.35 : 0.04}
             />
           </mesh>
         </group>
@@ -558,7 +536,7 @@ export function CurryModel({
         onSelect={handleSelect}
       >
         <group>
-          {/* Chunky simmered carrot half-moons */}
+          {/* Chunky simmered carrot half-moons with subtle organic bump */}
           {CARROT_CHUNKS.map((carrot, idx) => (
             <mesh
               key={`carrot-${idx}`}
@@ -570,17 +548,19 @@ export function CurryModel({
               receiveShadow
             >
               <meshPhysicalMaterial
-                color="#E8641B"
-                roughness={0.26}
-                clearcoat={0.48}
-                clearcoatRoughness={0.2}
+                color="#E56119"
+                bumpMap={vegBump}
+                bumpScale={0.016}
+                roughness={0.24}
+                clearcoat={0.62}
+                clearcoatRoughness={0.16}
                 emissive="#7D2900"
-                emissiveIntensity={isVegHi ? 0.35 : 0}
+                emissiveIntensity={isVegHi ? 0.32 : 0}
               />
             </mesh>
           ))}
 
-          {/* Golden-cream potato chunks */}
+          {/* Golden-cream potato chunks glistening with curry glaze */}
           {POTATO_CHUNKS.map((potato, idx) => (
             <mesh
               key={`potato-${idx}`}
@@ -592,12 +572,14 @@ export function CurryModel({
             >
               <dodecahedronGeometry args={[1, 2]} />
               <meshPhysicalMaterial
-                color="#EED28B"
-                roughness={0.34}
-                clearcoat={0.3}
-                clearcoatRoughness={0.25}
+                color="#ECCE84"
+                bumpMap={vegBump}
+                bumpScale={0.02}
+                roughness={0.38}
+                clearcoat={0.36}
+                clearcoatRoughness={0.22}
                 emissive="#6A4A10"
-                emissiveIntensity={isVegHi ? 0.32 : 0}
+                emissiveIntensity={isVegHi ? 0.3 : 0}
               />
             </mesh>
           ))}
@@ -607,11 +589,11 @@ export function CurryModel({
             <mesh key={`pea-${idx}`} position={pos} castShadow>
               <sphereGeometry args={[0.044, 14, 14]} />
               <meshPhysicalMaterial
-                color="#5CA634"
-                roughness={0.25}
-                clearcoat={0.5}
+                color="#5AA432"
+                roughness={0.22}
+                clearcoat={0.65}
                 emissive="#245210"
-                emissiveIntensity={isVegHi ? 0.4 : 0}
+                emissiveIntensity={isVegHi ? 0.36 : 0}
               />
             </mesh>
           ))}
@@ -628,18 +610,20 @@ export function CurryModel({
             >
               <meshPhysicalMaterial
                 color={idx % 2 === 0 ? '#BD241E' : '#D4362B'}
-                roughness={0.2}
-                clearcoat={0.75}
-                clearcoatRoughness={0.14}
+                bumpMap={vegBump}
+                bumpScale={0.014}
+                roughness={0.18}
+                clearcoat={0.85}
+                clearcoatRoughness={0.12}
                 emissive="#6A100A"
-                emissiveIntensity={isVegHi ? 0.4 : 0}
+                emissiveIntensity={isVegHi ? 0.36 : 0}
               />
             </mesh>
           ))}
         </group>
       </FoodLayer>
 
-      {/* Layer 5: Diagonally Sliced Crispy Pork Tonkatsu */}
+      {/* Layer 5: Diagonally Sliced Crispy Panko Pork Tonkatsu */}
       <FoodLayer
         partId="katsu"
         label="Crispy Pork Tonkatsu"
@@ -657,36 +641,42 @@ export function CurryModel({
               rotation={slice.rot}
               scale={slice.scale}
             >
-              {/* Crispy golden-brown panko exterior */}
+              {/* Crispy porous golden-fried panko breading with high roughness contrast */}
               <mesh geometry={katsuCrustGeo} castShadow receiveShadow>
                 <meshStandardMaterial
-                  color="#C87A28"
-                  map={pankoTexture ?? undefined}
-                  roughness={0.78}
+                  color="#E8B97A"
+                  map={pankoTex.map}
+                  bumpMap={pankoTex.bumpMap}
+                  bumpScale={0.058}
+                  roughnessMap={pankoTex.roughnessMap}
+                  roughness={0.95}
                   metalness={0.02}
                   emissive="#6B3408"
-                  emissiveIntensity={isKatsuHi ? 0.32 : 0}
+                  emissiveIntensity={isKatsuHi ? 0.28 : 0}
                 />
               </mesh>
 
-              {/* Tender warm off-white pork cross-section on cut faces */}
+              {/* Moist tender ivory pork cross-section on cut faces */}
               <mesh geometry={katsuPorkGeo} receiveShadow>
                 <meshPhysicalMaterial
-                  color="#F2DFCC"
-                  roughness={0.42}
-                  clearcoat={0.18}
-                  clearcoatRoughness={0.35}
+                  color="#F3E1CE"
+                  bumpMap={porkBump}
+                  bumpScale={0.015}
+                  roughness={0.36}
+                  clearcoat={0.28}
+                  clearcoatRoughness={0.28}
                   emissive="#634028"
-                  emissiveIntensity={isKatsuHi ? 0.25 : 0}
+                  emissiveIntensity={isKatsuHi ? 0.22 : 0}
                 />
               </mesh>
 
               {/* Subtle pearly fat cap accent along upper meat edge */}
               <mesh position={[0, 0.068, 0]} scale={[0.24, 0.018, 0.197]}>
                 <boxGeometry args={[1, 1, 1]} />
-                <meshStandardMaterial
+                <meshPhysicalMaterial
                   color="#FBF3E8"
-                  roughness={0.35}
+                  roughness={0.28}
+                  clearcoat={0.4}
                   emissive="#5C4428"
                   emissiveIntensity={isKatsuHi ? 0.2 : 0}
                 />
@@ -705,25 +695,27 @@ export function CurryModel({
                 >
                   <dodecahedronGeometry args={[1, 0]} />
                   <meshStandardMaterial
-                    color={cIdx % 2 === 0 ? '#DA8D36' : '#B8671E'}
-                    roughness={0.82}
+                    color={cIdx % 2 === 0 ? '#DF953A' : '#B5631B'}
+                    bumpMap={pankoTex.bumpMap}
+                    bumpScale={0.04}
+                    roughness={0.9}
                     emissive="#6B3408"
-                    emissiveIntensity={isKatsuHi ? 0.3 : 0}
+                    emissiveIntensity={isKatsuHi ? 0.28 : 0}
                   />
                 </mesh>
               ))}
             </group>
           ))}
 
-          {/* Glossy dark tonkatsu sauce drizzle ribbon */}
+          {/* Mirror-glossy dark tonkatsu sauce drizzle contrasting against crispy panko */}
           <mesh geometry={drizzleGeo} castShadow>
             <meshPhysicalMaterial
-              color="#3C1608"
-              roughness={0.12}
+              color="#341206"
+              roughness={0.08}
               clearcoat={1}
-              clearcoatRoughness={0.08}
+              clearcoatRoughness={0.05}
               emissive="#541806"
-              emissiveIntensity={isKatsuHi ? 0.35 : 0}
+              emissiveIntensity={isKatsuHi ? 0.34 : 0}
             />
           </mesh>
         </group>

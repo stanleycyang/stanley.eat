@@ -20,6 +20,38 @@ export interface DishPart {
   id: string;
   label: string;
   description: string;
+  cameraFocus?: {
+    target: [number, number, number];
+    position: [number, number, number];
+  };
+}
+
+export interface PantrySpec {
+  item: string;
+  brand: string;
+  why: string;
+}
+
+export interface LocalSpot {
+  name: string;
+  area: string;
+  note: string;
+}
+
+export type TableSurfaceType =
+  | 'ceramic-linen'
+  | 'wood-peel'
+  | 'hinoki-cedar'
+  | 'dark-slate'
+  | 'woven-bamboo';
+
+export interface DishAtmosphere {
+  surface: TableSurfaceType;
+  backdropInner: string;
+  backdropOuter: string;
+  keyLightColor: string;
+  keyLightIntensity: number;
+  ambientTint: string;
 }
 
 export interface DishRecipe {
@@ -36,6 +68,11 @@ export interface DishRecipe {
   isHot: boolean;
   accentColor: string;
   description: string;
+  vibeTag: string;
+  fieldNote: string;
+  pantrySpecs: PantrySpec[];
+  localSpots: LocalSpot[];
+  atmosphere: DishAtmosphere;
   parts: DishPart[];
   ingredients: DishIngredient[];
   steps: string[];

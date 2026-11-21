@@ -111,14 +111,14 @@ export function FoodLayer({
 
     if (highlighted && ringRef.current && ringMatRef.current) {
       const pulse = 0.5 + 0.5 * Math.sin(elapsed * 5.5);
-      const ringScale = baseRadiusRef.current * (1 + pulse * 0.045);
+      const ringScale = baseRadiusRef.current * (1 + pulse * 0.04);
       ringRef.current.scale.set(ringScale, ringScale, 1);
-      ringMatRef.current.opacity = 0.42 + pulse * 0.3;
+      ringMatRef.current.opacity = 0.34 + pulse * 0.24;
     }
 
     if (highlighted && lightRef.current) {
       const pulse = 0.5 + 0.5 * Math.sin(elapsed * 5.5);
-      lightRef.current.intensity = 0.9 + pulse * 0.55;
+      lightRef.current.intensity = 0.65 + pulse * 0.35;
     }
   });
 
@@ -160,21 +160,21 @@ export function FoodLayer({
             <ringGeometry args={[0.92, 1, 48]} />
             <meshBasicMaterial
               ref={ringMatRef}
-              color="#D9381E"
+              color="#C8341B"
               transparent
-              opacity={0.55}
+              opacity={0.44}
               side={THREE.DoubleSide}
               depthWrite={false}
-              toneMapped={false}
+              toneMapped
             />
           </mesh>
 
-          {/* Warm localized glow light accentuating the highlighted layer */}
+          {/* Warm localized glow light accentuating the highlighted layer (kept below bloom threshold) */}
           <pointLight
             ref={lightRef}
-            color="#FF6B4A"
-            intensity={1.1}
-            distance={2.6}
+            color="#FF8A65"
+            intensity={0.8}
+            distance={2.5}
             decay={2}
             position={[0, 0.42, 0.25]}
           />

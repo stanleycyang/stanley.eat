@@ -1,32 +1,27 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo } from 'react';
 import {
+  Bookmark,
   Check,
   ChefHat,
   Clock,
+  ExternalLink,
   Flame,
   Layers,
+  MapPin,
+  Play,
   RotateCcw,
   Share2,
   Sparkles,
   Timer,
   Users,
 } from 'lucide-react';
-import type { DishId, DishRecipe } from '@/types/dish';
+import type { DishRecipe } from '@/types/dish';
 
-export interface RecipePanelProps {
-  dish: DishRecipe;
-  highlightedPart: string | null;
-  onHoverPart: (partId: string | null) => void;
-  onSelectPart: (partId: string | null) => void;
-  onShare: () => void;
-  shareCopied: boolean;
-}
+export type ScaleFactor = 1 | 2 | 4;
 
-type ScaleFactor = 1 | 2 | 4;
-
-const SCALE_OPTIONS: readonly ScaleFactor[] = [1, 2, 4];
+export const SCALE_OPTIONS: readonly ScaleFactor[] = [1, 2, 4];
 
 const SPICE_LABELS: Record<1 | 2 | 3 | 4 | 5, string> = {
   1: 'Mild',
@@ -50,7 +45,10 @@ const CULINARY_FRACTIONS: ReadonlyArray<readonly [number, string]> = [
   [1, ''],
 ];
 
-function formatCulinaryAmount(amount: number | null, scale: ScaleFactor): string {
+export function formatCulinaryAmount(
+  amount: number | null,
+  scale: ScaleFactor
+): string {
   if (amount === null) return '';
 
   const scaled = amount * scale;
@@ -74,6 +72,21 @@ function formatCulinaryAmount(amount: number | null, scale: ScaleFactor): string
   return Number(scaled.toFixed(1)).toString();
 }
 
+export interface RecipePanelProps {
+  dish: DishRecipe;
+  highlightedPart: string | null;
+  onHoverPart: (partId: string | null) => void;
+  onSelectPart: (partId: string | null) => void;
+  onShare: () => void;
+  shareCopied: boolean;
+  scale: ScaleFactor;
+  onChangeScale: (scale: ScaleFactor) => void;
+  checkedMap: Record<string, boolean>;
+  onToggleIngredient: (ingredientId: string) => void;
+  onResetChecked: () => void;
+  onOpenCookMode: () => void;
+}
+
 export function RecipePanel({
   dish,
   highlightedPart,
@@ -81,18 +94,13 @@ export function RecipePanel({
   onSelectPart,
   onShare,
   shareCopied,
+  scale,
+  onChangeScale,
+  checkedMap,
+  onToggleIngredient,
+  onResetChecked,
+  onOpenCookMode,
 }: RecipePanelProps) {
-  const [scaleByDish, setScaleByDish] = useState<Partial<Record<DishId, ScaleFactor>>>({});
-  const [checkedByDish, setCheckedByDish] = useState<
-    Partial<Record<DishId, Record<string, boolean>>>
-  >({});
-
-  const scale: ScaleFactor = scaleByDish[dish.id] ?? 1;
-  const checkedMap = useMemo(
-    () => checkedByDish[dish.id] ?? {},
-    [checkedByDish, dish.id]
-  );
-
   const partLookup = useMemo(() => {
     const map: Record<string, string> = {};
     for (const part of dish.parts) {
@@ -113,38 +121,11 @@ export function RecipePanel({
 
   const totalServings = dish.baseServings * scale;
 
-  const handleSetScale = (nextScale: ScaleFactor) => {
-    setScaleByDish((prev) => ({
-      ...prev,
-      [dish.id]: nextScale,
-    }));
-  };
-
-  const handleToggleIngredient = (ingredientId: string) => {
-    setCheckedByDish((prev) => {
-      const currentDishMap = prev[dish.id] ?? {};
-      return {
-        ...prev,
-        [dish.id]: {
-          ...currentDishMap,
-          [ingredientId]: !currentDishMap[ingredientId],
-        },
-      };
-    });
-  };
-
-  const handleResetChecked = () => {
-    setCheckedByDish((prev) => ({
-      ...prev,
-      [dish.id]: {},
-    }));
-  };
-
   return (
     <article className="mx-auto w-full max-w-[640px] px-5 py-7 sm:px-8 sm:py-9 lg:px-10 lg:py-10">
-      {/* Top Editorial Meta Row: Cuisine Tag + Share Button */}
+      {/* Top Editorial Meta Row: Cuisine + Vibe Tag + Actions */}
       <header className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0] bg-[#FAF7F2] px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B6258]">
               <span
@@ -153,6 +134,13 @@ export function RecipePanel({
               />
               {dish.cuisine}
             </span>
+
+            {dish.vibeTag && (
+              <span className="inline-flex items-center rounded-full border border-[#E4D9C8] bg-[#EFE8DC]/75 px-2.5 py-1 text-[11px] font-medium tracking-[0.01em] text-[#575049]">
+                {dish.vibeTag}
+              </span>
+            )}
+
             {dish.isHot && (
               <span className="inline-flex items-center gap-1 rounded-full border border-[#F0D9CE] bg-[#FFF5F0] px-2.5 py-1 text-[11px] font-medium text-[#B8321B]">
                 <Flame className="h-3 w-3" aria-hidden="true" />
@@ -164,7 +152,11 @@ export function RecipePanel({
           <button
             type="button"
             onClick={onShare}
-            aria-label={shareCopied ? 'Recipe link copied to clipboard' : `Share ${dish.name} recipe link`}
+            aria-label={
+              shareCopied
+                ? 'Recipe link copied to clipboard'
+                : `Share ${dish.name} recipe link`
+            }
             className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-all duration-200 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] focus-visible:ring-offset-2 focus-visible:ring-offset-[#FFFDF9] ${
               shareCopied
                 ? 'border-[#D9381E] bg-[#D9381E] text-[#FFFDF9] shadow-[0_4px_12px_-3px_rgba(217,56,30,0.45)]'
@@ -198,6 +190,18 @@ export function RecipePanel({
         <p className="text-[15px] leading-[1.7] text-[#443E37]">
           {dish.description}
         </p>
+
+        {/* Stanley's Field Note */}
+        {dish.fieldNote && (
+          <blockquote className="rounded-r-xl border-l-2 border-[#D9381E]/60 bg-[#FAF7F2]/85 px-4 py-3">
+            <span className="mb-1 block font-mono text-[10.5px] font-semibold uppercase tracking-[0.12em] text-[#8A7E71]">
+              Stanley&apos;s Field Note
+            </span>
+            <p className="font-serif text-[14.5px] italic leading-[1.62] text-[#3F3730]">
+              &ldquo;{dish.fieldNote}&rdquo;
+            </p>
+          </blockquote>
+        )}
       </header>
 
       {/* Cookbook Spec Strip: Prep, Cook, Servings, Spice Level */}
@@ -265,6 +269,32 @@ export function RecipePanel({
         </div>
       </section>
 
+      {/* Prominent Hands-Free Cook Mode CTA */}
+      <div className="mt-4">
+        <button
+          type="button"
+          onClick={onOpenCookMode}
+          className="group flex w-full items-center justify-between gap-3 rounded-2xl border border-[#C63018] bg-[#D9381E] px-4 py-3 text-left text-[#FFFDF9] shadow-[0_8px_22px_-8px_rgba(217,56,30,0.5),inset_0_1px_1px_rgba(255,255,255,0.24)] transition-all duration-200 hover:bg-[#C73119] active:scale-[0.995] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] focus-visible:ring-offset-2 focus-visible:ring-offset-[#FFFDF9]"
+        >
+          <span className="flex items-center gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#FFFDF9]/18 transition-transform duration-200 group-hover:scale-105">
+              <Play className="h-4 w-4 fill-current" aria-hidden="true" />
+            </span>
+            <span className="flex flex-col">
+              <span className="text-[14px] font-semibold tracking-[-0.01em] leading-tight">
+                Start Cooking
+              </span>
+              <span className="text-[11.5px] text-[#FFE8E0]/90">
+                Hands-free counter view · auto timers &amp; screen awake
+              </span>
+            </span>
+          </span>
+          <span className="hidden sm:inline-flex shrink-0 items-center rounded-md border border-[#FFFDF9]/25 bg-[#FFFDF9]/12 px-2 py-0.5 font-mono text-[11px] font-medium text-[#FFFDF9]">
+            C
+          </span>
+        </button>
+      </div>
+
       {/* Interactive 3D Component Legend / Layer Chips */}
       <section aria-label="3D dish layers" className="mt-7">
         <div className="mb-2.5 flex items-center justify-between gap-2">
@@ -273,7 +303,7 @@ export function RecipePanel({
             3D Dish Anatomy
           </h2>
           <span className="text-[11px] text-[#8C8175]">
-            Hover or click to highlight
+            Hover to pulse · click to focus camera
           </span>
         </div>
 
@@ -349,7 +379,7 @@ export function RecipePanel({
                 </span>
                 <button
                   type="button"
-                  onClick={handleResetChecked}
+                  onClick={onResetChecked}
                   className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium text-[#6B6258] transition-colors hover:bg-[#EFE8DC] hover:text-[#D9381E] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
                 >
                   <RotateCcw className="h-3 w-3" aria-hidden="true" />
@@ -371,7 +401,7 @@ export function RecipePanel({
                 <button
                   key={option}
                   type="button"
-                  onClick={() => handleSetScale(option)}
+                  onClick={() => onChangeScale(option)}
                   aria-pressed={isSelected}
                   className={`rounded-full px-3 py-1 font-mono text-xs font-semibold transition-all duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
                     isSelected
@@ -419,7 +449,7 @@ export function RecipePanel({
                   type="button"
                   role="checkbox"
                   aria-checked={isChecked}
-                  onClick={() => handleToggleIngredient(ingredient.id)}
+                  onClick={() => onToggleIngredient(ingredient.id)}
                   className={`group flex w-full items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-all duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
                     isPartHighlighted
                       ? 'border-[#D9381E]/40 bg-[#FFF5F0] shadow-[0_2px_10px_-4px_rgba(217,56,30,0.18)]'
@@ -501,20 +531,73 @@ export function RecipePanel({
         </ul>
       </section>
 
+      {/* Pantry Specs: Compact Scannable Go-To Brands */}
+      {dish.pantrySpecs && dish.pantrySpecs.length > 0 && (
+        <section
+          aria-labelledby="pantry-specs-heading"
+          className="mt-7 rounded-2xl border border-[#E6DDD0] bg-[#FAF7F2] p-4 sm:p-5"
+        >
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <h3
+              id="pantry-specs-heading"
+              className="inline-flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B6258]"
+            >
+              <Bookmark className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
+              Pantry Specs
+            </h3>
+            <span className="font-mono text-[10.5px] text-[#8A7E71]">
+              Exact brands in my kitchen
+            </span>
+          </div>
+
+          <dl className="divide-y divide-[#E6DDD0]/80">
+            {dish.pantrySpecs.map((spec) => (
+              <div
+                key={`${spec.item}-${spec.brand}`}
+                className="py-2.5 first:pt-0.5 last:pb-0.5"
+              >
+                <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
+                  <dt className="font-mono text-[11px] font-semibold uppercase tracking-[0.06em] text-[#786E63]">
+                    {spec.item}
+                  </dt>
+                  <dd className="text-[13.5px] font-semibold text-[#1C1917]">
+                    {spec.brand}
+                  </dd>
+                </div>
+                <p className="mt-1 text-[12.5px] leading-[1.55] text-[#5C534A]">
+                  {spec.why}
+                </p>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
+
       <hr className="my-8 border-[#E6DDD0]" />
 
       {/* Clean Numbered Cooking Steps */}
       <section aria-labelledby="steps-heading">
-        <div className="mb-5 flex items-baseline justify-between gap-2">
-          <h2
-            id="steps-heading"
-            className="font-serif text-[23px] font-semibold tracking-[-0.02em] text-[#1C1917]"
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-baseline gap-2.5">
+            <h2
+              id="steps-heading"
+              className="font-serif text-[23px] font-semibold tracking-[-0.02em] text-[#1C1917]"
+            >
+              Method
+            </h2>
+            <span className="font-mono text-xs text-[#8A7E71]">
+              {dish.steps.length} {dish.steps.length === 1 ? 'step' : 'steps'}
+            </span>
+          </div>
+
+          <button
+            type="button"
+            onClick={onOpenCookMode}
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0] bg-[#FAF7F2] px-3 py-1 text-xs font-semibold text-[#1C1917] transition-all hover:border-[#D9381E]/50 hover:bg-[#FFF5F0] hover:text-[#D9381E] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
           >
-            Method
-          </h2>
-          <span className="font-mono text-xs text-[#8A7E71]">
-            {dish.steps.length} {dish.steps.length === 1 ? 'step' : 'steps'}
-          </span>
+            <Play className="h-3 w-3 fill-current text-[#D9381E]" aria-hidden="true" />
+            Cook Mode
+          </button>
         </div>
 
         <ol className="space-y-5">
@@ -552,6 +635,92 @@ export function RecipePanel({
           {dish.stanleysTip}
         </p>
       </aside>
+
+      {/* Too Lazy to Cook? Bay Area Go-To Spots */}
+      {dish.localSpots && dish.localSpots.length > 0 && (
+        <section
+          aria-labelledby="local-spots-heading"
+          className="mt-5 rounded-2xl border border-[#E6DDD0] bg-[#FAF7F2] p-5"
+        >
+          <div className="mb-3.5 flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-[#EFE8DC] text-[#D9381E]">
+                <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
+              </span>
+              <div>
+                <h3
+                  id="local-spots-heading"
+                  className="font-serif text-[15.5px] font-semibold leading-tight text-[#1C1917]"
+                >
+                  Too Lazy to Cook?
+                </h3>
+                <p className="font-mono text-[10.5px] uppercase tracking-[0.1em] text-[#8A7E71]">
+                  Bay Area Go-To Spots
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <ul className="space-y-3">
+            {dish.localSpots.map((spot) => (
+              <li
+                key={`${spot.name}-${spot.area}`}
+                className="rounded-xl border border-[#E8DFD2] bg-[#FFFDF9] px-3.5 py-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="text-[14px] font-semibold text-[#1C1917]">
+                    {spot.name}
+                  </span>
+                  <span className="rounded-full border border-[#E6DDD0] bg-[#FAF7F2] px-2.5 py-0.5 font-mono text-[10.5px] font-medium text-[#6B6258]">
+                    {spot.area}
+                  </span>
+                </div>
+                <p className="mt-1 text-[13px] leading-[1.55] text-[#5C534A]">
+                  {spot.note}
+                </p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {/* Minimal Editorial Colophon Footer */}
+      <footer className="mt-10 border-t border-[#E6DDD0] pt-6">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="font-mono text-[11.5px] text-[#786E63]">
+            Built by <span className="font-medium text-[#1C1917]">Stanley Yang</span> · Silicon Valley
+          </p>
+          <div className="flex flex-wrap items-center gap-4 text-[12px] font-medium text-[#6B6258]">
+            <a
+              href="https://stanleycyang.com"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 transition-colors hover:text-[#D9381E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] rounded-sm"
+            >
+              stanleycyang.com
+              <ExternalLink className="h-3 w-3 opacity-65" aria-hidden="true" />
+            </a>
+            <a
+              href="https://github.com/stanleycyang"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 transition-colors hover:text-[#D9381E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] rounded-sm"
+            >
+              GitHub
+              <ExternalLink className="h-3 w-3 opacity-65" aria-hidden="true" />
+            </a>
+            <a
+              href="https://x.com/stanleycyang"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 transition-colors hover:text-[#D9381E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] rounded-sm"
+            >
+              X
+              <ExternalLink className="h-3 w-3 opacity-65" aria-hidden="true" />
+            </a>
+          </div>
+        </div>
+      </footer>
     </article>
   );
 }
