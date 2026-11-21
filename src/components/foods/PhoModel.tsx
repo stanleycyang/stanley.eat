@@ -87,17 +87,6 @@ const HERB_LEAVES: HerbLeafSpec[] = [
   { pos: [0.32, 0.19, 0.56], rot: [-0.3, 2.8, -0.18], scale: 0.86 },
 ];
 
-const OIL_DROPLETS: [number, number, number, number][] = [
-  [0.78, 0.132, 0.28, 0.052],
-  [-0.74, 0.132, 0.42, 0.044],
-  [0.44, 0.132, -0.68, 0.048],
-  [-0.12, 0.132, 0.78, 0.042],
-  [0.86, 0.132, -0.14, 0.038],
-  [-0.68, 0.132, -0.52, 0.046],
-  [0.08, 0.132, -0.78, 0.04],
-  [-0.86, 0.132, 0.04, 0.044],
-];
-
 function createSeededRand(seed: number): () => number {
   let a = seed | 0;
   return () => {
@@ -126,7 +115,7 @@ export function PhoModel({
   const noodleNormal = useMemo(() => getOrganicNormalMap(307, 14, 0.9), []);
   const garnishNormal = useMemo(() => getOrganicNormalMap(433, 12, 1.5), []);
 
-  // Per-instance real PBR studio-reflecting broth + SSS materials (disposed on unmount)
+  // Per-instance opaque real PBR studio-reflecting broth + SSS materials (disposed on unmount)
   const brothMat = useMemo(
     () =>
       createPbrBrothMaterial({
@@ -134,7 +123,7 @@ export function PhoModel({
         oilColor: '#D99A2E',
         sheenColor: '#FFF0C4',
         isSpicy: false,
-        opacity: 0.88,
+        opacity: 1.0,
       }),
     []
   );
@@ -433,15 +422,15 @@ export function PhoModel({
     return geo;
   }, []);
 
-  // Vibrant lime wedge geometry (rind + pith + backlit SSS juicy flesh)
+  // Vibrant lime wedge geometry (cleanly stepped Z depths: rind ±0.084, pith ±0.088, flesh ±0.093)
   const { limeRindGeo, limePithGeo, limeFleshGeo } = useMemo(() => {
     const rindShape = new THREE.Shape();
     rindShape.absarc(0, 0, 0.27, 0, Math.PI, false);
     rindShape.lineTo(0.27, 0);
     const rind = new THREE.ExtrudeGeometry(rindShape, {
-      depth: 0.16,
+      depth: 0.14,
       bevelEnabled: true,
-      bevelThickness: 0.018,
+      bevelThickness: 0.014,
       bevelSize: 0.012,
       bevelSegments: 3,
       curveSegments: 24,
@@ -452,7 +441,7 @@ export function PhoModel({
     pithShape.absarc(0, 0, 0.235, 0.04, Math.PI - 0.04, false);
     pithShape.lineTo(0.235 * Math.cos(0.04), 0.235 * Math.sin(0.04));
     const pith = new THREE.ExtrudeGeometry(pithShape, {
-      depth: 0.184,
+      depth: 0.176,
       bevelEnabled: false,
       curveSegments: 22,
     });
@@ -462,7 +451,7 @@ export function PhoModel({
     fleshShape.absarc(0, 0, 0.21, 0.08, Math.PI - 0.08, false);
     fleshShape.lineTo(0.21 * Math.cos(0.08), 0.21 * Math.sin(0.08));
     const flesh = new THREE.ExtrudeGeometry(fleshShape, {
-      depth: 0.194,
+      depth: 0.186,
       bevelEnabled: false,
       curveSegments: 20,
     });
@@ -621,13 +610,13 @@ export function PhoModel({
         onSelect={handleSelect}
       >
         <group>
-          <mesh geometry={brothGeo} material={brothMat} receiveShadow renderOrder={1} />
+          <mesh geometry={brothGeo} material={brothMat} receiveShadow />
 
           {/* Delicate glistening capillary meniscus ring bridging broth edge (1.145) to inner bowl wall (1.187) */}
           <mesh
-            position={[0, 0.124, 0]}
+            position={[0, 0.125, 0]}
             rotation={[Math.PI / 2, 0, 0]}
-            scale={[1, 1, 1.35]}
+            scale={[1, 1, 1.15]}
             renderOrder={2}
           >
             <torusGeometry args={[1.158, 0.014, 12, 72]} />
@@ -644,30 +633,6 @@ export function PhoModel({
               emissiveIntensity={isBrothHi ? 0.32 : 0.06}
             />
           </mesh>
-
-          {/* Physical golden marrow oil pearls cleanly above broth surface (zero transparent z-fighting) */}
-          {OIL_DROPLETS.map(([x, y, z, r], idx) => (
-            <mesh
-              key={`oil-${idx}`}
-              position={[x, y, z]}
-              scale={[1, 0.14, 1]}
-              receiveShadow
-              renderOrder={2}
-            >
-              <sphereGeometry args={[r, 12, 10]} />
-              <meshPhysicalMaterial
-                color="#D99A2E"
-                transparent
-                opacity={0.72}
-                depthWrite={false}
-                roughness={0.04}
-                clearcoat={1}
-                clearcoatRoughness={0.03}
-                emissive="#8A5208"
-                emissiveIntensity={isBrothHi ? 0.28 : 0}
-              />
-            </mesh>
-          ))}
         </group>
       </FoodLayer>
 
@@ -902,7 +867,7 @@ export function PhoModel({
                 position={[Math.sin(ang) * 0.09, Math.cos(ang) * 0.09 - 0.03, 0]}
                 rotation={[0, 0, -ang]}
               >
-                <boxGeometry args={[0.01, 0.17, 0.198]} />
+                <boxGeometry args={[0.01, 0.17, 0.194]} />
                 <meshStandardMaterial color="#EFF5DC" roughness={0.5} />
               </mesh>
             ))}

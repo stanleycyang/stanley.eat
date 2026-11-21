@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import Image from 'next/image';
 import {
   Compass,
   ExternalLink,
@@ -24,17 +25,17 @@ const STANLEY_LINKS = [
   {
     label: 'stanleycyang.com',
     href: 'https://stanleycyang.com',
-    description: 'Writing, engineering notes & indie projects',
+    description: 'Personal site',
   },
   {
     label: 'GitHub',
     href: 'https://github.com/stanleycyang',
-    description: 'Code & experiments',
+    description: '@stanleycyang',
   },
   {
-    label: 'X / @stanleycyang',
+    label: 'X',
     href: 'https://x.com/stanleycyang',
-    description: 'Thoughts & builds',
+    description: '@stanleycyang',
   },
 ] as const;
 
@@ -83,20 +84,30 @@ export function AboutStanleyModal({
         {/* Cookbook Dust-Jacket Header */}
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[#E6DDD0] bg-[#FFFDF9] px-5 py-5 sm:px-7">
           <div className="flex items-center gap-3.5">
-            <span
-              aria-hidden="true"
-              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full border border-[#E6D5C3] bg-[#F7EFE4] font-serif text-lg font-semibold tracking-[-0.03em] text-[#D9381E] shadow-[inset_0_1px_1px_rgba(255,255,255,0.9)]"
-            >
-              SY
-            </span>
+            <Image
+              src="/stanley-avatar.jpg"
+              alt="Stanley Yang"
+              width={48}
+              height={48}
+              className="h-12 w-12 shrink-0 rounded-full object-cover object-[56%_22%] ring-2 ring-[#E6DDD0] shadow-sm"
+            />
             <div>
-              <h2
-                id="about-stanley-title"
-                className="font-serif text-2xl sm:text-[26px] font-semibold leading-tight tracking-[-0.03em] text-[#1C1917]"
-              >
-                stanley<span className="text-[#D9381E]">.eat</span>
-              </h2>
-              <p className="font-serif text-sm italic text-[#6B6258]">
+              <div className="flex items-center gap-2">
+                <Image
+                  src="/logo-mark.png"
+                  alt=""
+                  width={24}
+                  height={24}
+                  className="h-5.5 w-5.5 shrink-0"
+                />
+                <h2
+                  id="about-stanley-title"
+                  className="font-serif text-2xl sm:text-[26px] font-semibold leading-tight tracking-[-0.03em] text-[#1C1917]"
+                >
+                  stanley<span className="text-[#D9381E]">.eat</span>
+                </h2>
+              </div>
+              <p className="mt-0.5 font-serif text-sm italic text-[#6B6258]">
                 A personal vault of my 7 favorite foods
               </p>
             </div>
@@ -116,13 +127,8 @@ export function AboutStanleyModal({
         <div className="flex-1 space-y-6 overflow-y-auto px-5 py-6 sm:px-7">
           {/* Personal Note */}
           <section className="rounded-2xl border border-[#E6DDD0] border-l-4 border-l-[#D9381E] bg-[#FFFDF9] p-5">
-            <p className="text-[15px] leading-[1.75] text-[#292524]">
-              I&apos;m <strong className="font-semibold text-[#1C1917]">Stanley Yang</strong>{' '}
-              — a Silicon Valley software engineer, builder, and obsessive home cook. Between
-              shipping AI systems and building playful web experiments, these are the 7 dishes I
-              keep coming back to: the ratios I&apos;ve dialed in at home, the pantry brands I
-              actually buy, and the Bay Area spots I drive to when I don&apos;t feel like turning
-              on the stove.
+            <p className="font-serif text-[17px] sm:text-[18px] leading-[1.6] text-[#1C1917]">
+              My name is Stanley Yang. Here are the 7 dishes I keep coming back to.
             </p>
           </section>
 

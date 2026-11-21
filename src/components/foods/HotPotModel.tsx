@@ -287,6 +287,18 @@ export function HotPotModel({
     });
     divider.rotateX(-Math.PI / 2);
     divider.translate(0, -0.39, 0);
+    // Taper divider lower corners inward to match the curved stainless pot inner belly cleanly
+    const divPos = divider.attributes.position;
+    for (let i = 0; i < divPos.count; i++) {
+      const y = divPos.getY(i);
+      if (y < -0.02) {
+        const t = THREE.MathUtils.clamp((-0.02 - y) / 0.37, 0, 1);
+        const shrink = 1 - t * t * 0.24;
+        divPos.setX(i, divPos.getX(i) * shrink);
+        divPos.setZ(i, divPos.getZ(i) * shrink);
+      }
+    }
+    divPos.needsUpdate = true;
     divider.computeVertexNormals();
 
     const hCurve = new THREE.CatmullRomCurve3([
@@ -523,9 +535,9 @@ export function HotPotModel({
     return geo;
   }, []);
 
-  // Organically sculpted spiraled marbled beef roll geometry
+  // Organically sculpted spiraled marbled beef roll geometry (clean Z end-cap clearance)
   const { beefSpiralMeatGeo, beefSpiralFatGeo } = useMemo(() => {
-    const makeSpiral = (thickness: number, offsetR: number, seed: number) => {
+    const makeSpiral = (thickness: number, offsetR: number, depth: number, seed: number) => {
       const pts: THREE.Vector2[] = [];
       const steps = 42;
       const maxTheta = Math.PI * 3.6;
@@ -565,7 +577,7 @@ export function HotPotModel({
       shape.closePath();
 
       const geo = new THREE.ExtrudeGeometry(shape, {
-        depth: 0.28,
+        depth,
         bevelEnabled: true,
         bevelThickness: 0.008,
         bevelSize: 0.006,
@@ -582,8 +594,8 @@ export function HotPotModel({
     };
 
     return {
-      beefSpiralMeatGeo: makeSpiral(0.022, 0, 577),
-      beefSpiralFatGeo: makeSpiral(0.011, 0.014, 577),
+      beefSpiralMeatGeo: makeSpiral(0.022, 0, 0.28, 577),
+      beefSpiralFatGeo: makeSpiral(0.011, 0.017, 0.288, 577),
     };
   }, []);
 

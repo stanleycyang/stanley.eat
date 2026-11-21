@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import Image from 'next/image';
 import { ArrowRight, Clock, Flame, X } from 'lucide-react';
 import type { DishId, DishRecipe } from '@/types/dish';
 
@@ -77,9 +78,18 @@ export function TastingMenuModal({
         {/* Editorial Tasting Menu Header */}
         <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[#E6DDD0] bg-[#FFFDF9]/95 px-5 py-4 sm:px-7 sm:py-5">
           <div className="space-y-1">
-            <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[#D9381E]">
-              stanley.eat · 7-Course Tasting Menu
-            </p>
+            <div className="flex items-center gap-2">
+              <Image
+                src="/logo-mark.png"
+                alt=""
+                width={20}
+                height={20}
+                className="h-5 w-5 shrink-0"
+              />
+              <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[#D9381E]">
+                stanley.eat · 7-Course Tasting Menu
+              </p>
+            </div>
             <h2
               id="tasting-menu-title"
               className="font-serif text-2xl sm:text-[28px] font-semibold tracking-[-0.025em] text-[#1C1917]"

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import Image from 'next/image';
 import { useSearchParams } from 'next/navigation';
 import { RECIPES, getDishById } from '@/data/recipes';
 import type { DishId } from '@/types/dish';
@@ -337,9 +338,17 @@ export function StanleyEatApp() {
               type="button"
               onClick={handleOpenMenu}
               aria-label="stanley.eat — open 7-course tasting menu"
-              className="pointer-events-auto inline-flex items-baseline rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/88 px-3 py-1.5 backdrop-blur-md shadow-[0_6px_18px_-8px_rgba(28,25,23,0.14)] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] sm:px-3.5"
+              className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/90 py-1 pr-2.5 pl-1.5 backdrop-blur-md shadow-[0_6px_18px_-8px_rgba(28,25,23,0.14)] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] sm:gap-2 sm:py-1 sm:pr-3.5 sm:pl-1.5"
             >
-              <span className="font-serif text-[17px] sm:text-[21px] font-semibold leading-none tracking-[-0.03em] text-[#1C1917]">
+              <Image
+                src="/logo-mark.png"
+                alt=""
+                width={28}
+                height={28}
+                priority
+                className="h-6 w-6 shrink-0 sm:h-7 sm:w-7"
+              />
+              <span className="font-serif text-[16px] sm:text-[21px] font-semibold leading-none tracking-[-0.03em] text-[#1C1917]">
                 stanley<span className="text-[#D9381E]">.eat</span>
               </span>
             </button>
@@ -349,14 +358,16 @@ export function StanleyEatApp() {
               onClick={handleOpenAbout}
               title="About Stanley Yang"
               aria-label="About Stanley Yang and this vault"
-              className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/84 p-1 text-[11.5px] font-medium text-[#443E37] backdrop-blur-md shadow-[0_6px_18px_-8px_rgba(28,25,23,0.12)] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] hover:text-[#1C1917] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] sm:py-1 sm:pr-3 sm:pl-1.5"
+              className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/88 p-0.5 text-[11.5px] font-medium text-[#443E37] backdrop-blur-md shadow-[0_6px_18px_-8px_rgba(28,25,23,0.12)] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] hover:text-[#1C1917] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] sm:py-1 sm:pr-3 sm:pl-1"
             >
-              <span
-                aria-hidden="true"
-                className="flex h-5 w-5 items-center justify-center rounded-full bg-[#EFE8DC] font-serif text-[10px] font-semibold text-[#D9381E]"
-              >
-                SY
-              </span>
+              <Image
+                src="/stanley-avatar.jpg"
+                alt="Stanley Yang"
+                width={24}
+                height={24}
+                priority
+                className="h-6 w-6 shrink-0 rounded-full object-cover object-[56%_22%] ring-1 ring-[#E6DDD0]"
+              />
               <span className="hidden sm:inline">by Stanley Yang</span>
             </button>
           </div>

@@ -831,9 +831,8 @@ export function RecipePanel({
         {/* Minimal Editorial Colophon Footer */}
         <footer className="mt-10 border-t border-[#E6DDD0] pt-6">
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="font-mono text-[11.5px] text-[#786E63]">
-              Built by <span className="font-medium text-[#1C1917]">Stanley Yang</span> ·
-              Silicon Valley
+            <p className="font-mono text-[11.5px] font-medium text-[#1C1917]">
+              Stanley Yang
             </p>
             <div className="flex flex-wrap items-center gap-4 text-[12px] font-medium text-[#6B6258]">
               <button
@@ -841,7 +840,7 @@ export function RecipePanel({
                 onClick={onOpenAbout}
                 className="font-semibold text-[#1C1917] transition-colors hover:text-[#D9381E] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] rounded-sm"
               >
-                About Stanley
+                About
               </button>
               <a
                 href="https://stanleycyang.com"

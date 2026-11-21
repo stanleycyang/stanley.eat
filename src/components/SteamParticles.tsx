@@ -26,7 +26,7 @@ interface SteamWispSeed {
   shaderSeed: number;
 }
 
-const WISP_COUNT = 22;
+const WISP_COUNT = 16;
 
 function mulberry32(seed: number): () => number {
   let a = seed | 0;
@@ -101,29 +101,30 @@ const STEAM_FRAGMENT_SHADER = /* glsl */ `
     if (dist >= 1.0) discard;
 
     // Soft radial + vertical plume envelope so quad borders are completely invisible
-    float radialMask = pow(1.0 - smoothstep(0.08, 0.96, dist), 1.45);
-    float vertMask = smoothstep(0.0, 0.24, vUv.y) * (1.0 - smoothstep(0.70, 1.0, vUv.y));
+    float radialMask = pow(1.0 - smoothstep(0.06, 0.94, dist), 1.65);
+    float vertMask = smoothstep(0.0, 0.28, vUv.y) * (1.0 - smoothstep(0.68, 1.0, vUv.y));
 
-    // Organic curl-like FBM domain warp scrolling upward with time
-    vec2 q = vec2(p.x * 1.45, p.y * 1.15 - uTime * 0.28 + vSeed * 11.3);
+    // Delicate curling FBM filaments scrolling gently upward
+    vec2 q = vec2(p.x * 1.55, p.y * 1.15 - uTime * 0.25 + vSeed * 11.3);
     vec2 curl = vec2(
-      fbm(q + vec2(vSeed * 3.7, -uTime * 0.16)) - 0.5,
-      fbm(q + vec2(-vSeed * 2.9 + 5.2, uTime * 0.14)) - 0.5
+      fbm(q + vec2(vSeed * 3.7, -uTime * 0.14)) - 0.5,
+      fbm(q + vec2(-vSeed * 2.9 + 5.2, uTime * 0.12)) - 0.5
     );
-    float wisps = fbm(q * 1.65 + curl * 1.75);
-    float filaments = smoothstep(0.28, 0.78, wisps);
+    float wisps = fbm(q * 1.75 + curl * 1.85);
+    float filaments = smoothstep(0.38, 0.82, wisps);
 
-    // Life-cycle fade: gentle emerge at dish surface, airy dissolve aloft
-    float fadeIn = smoothstep(0.0, 0.18, vProgress);
-    float fadeOut = 1.0 - smoothstep(0.42, 1.0, vProgress);
+    // Gentle life-cycle fade: subtle emerge above broth, airy dissolve aloft
+    float fadeIn = smoothstep(0.0, 0.22, vProgress);
+    float fadeOut = 1.0 - smoothstep(0.38, 1.0, vProgress);
     float lifeAlpha = fadeIn * fadeOut * fadeOut;
 
-    float alpha = radialMask * vertMask * filaments * lifeAlpha * 0.26;
-    if (alpha < 0.004) discard;
+    // Restrained photographic opacity so stacked wisps never look like opaque white smoke
+    float alpha = radialMask * vertMask * filaments * lifeAlpha * 0.14;
+    if (alpha < 0.003) discard;
 
-    // Subtle warm studio back-left rim luminance across the rising wisp
-    float studioRim = smoothstep(-0.6, 0.7, -p.x * 0.45 + p.y * 0.55 + (wisps - 0.5) * 0.5);
-    vec3 steamColor = mix(vec3(0.95, 0.92, 0.88), vec3(1.0, 0.98, 0.94), studioRim);
+    // Warm soft ivory tint (#FFF9F0) catching gentle studio rim light
+    float studioRim = smoothstep(-0.6, 0.7, -p.x * 0.4 + p.y * 0.5 + (wisps - 0.5) * 0.4);
+    vec3 steamColor = mix(vec3(0.96, 0.935, 0.90), vec3(1.0, 0.976, 0.941), studioRim);
 
     gl_FragColor = vec4(steamColor, alpha);
   }
@@ -147,16 +148,16 @@ export function SteamParticles({
     const rand = mulberry32(202605);
     return Array.from({ length: WISP_COUNT }, (_, i) => ({
       phase: i / WISP_COUNT + rand() * 0.06,
-      speed: 0.14 + rand() * 0.09,
-      radius: Math.sqrt(rand()) * 0.88,
+      speed: 0.13 + rand() * 0.08,
+      radius: Math.sqrt(rand()) * 0.85,
       angle: rand() * Math.PI * 2,
-      swayFreqX: 0.55 + rand() * 0.65,
-      swayFreqZ: 0.5 + rand() * 0.65,
-      swayAmp: 0.09 + rand() * 0.12,
-      baseWidth: 0.58 + rand() * 0.42,
-      baseHeight: 0.82 + rand() * 0.56,
-      rotSpeed: (rand() - 0.5) * 0.24,
-      maxHeight: 1.55 + rand() * 0.65,
+      swayFreqX: 0.5 + rand() * 0.6,
+      swayFreqZ: 0.48 + rand() * 0.6,
+      swayAmp: 0.08 + rand() * 0.1,
+      baseWidth: 0.46 + rand() * 0.3,
+      baseHeight: 0.76 + rand() * 0.48,
+      rotSpeed: (rand() - 0.5) * 0.22,
+      maxHeight: 1.48 + rand() * 0.58,
       shaderSeed: rand() * 10,
     }));
   }, []);
@@ -217,7 +218,7 @@ export function SteamParticles({
 
     const explodeFactor = smoothExplodeRef.current;
     const currentBaseY = baseY + explodeFactor * 0.55;
-    const currentSpread = spread * (1 + explodeFactor * 0.28);
+    const currentSpread = spread * 0.85 * (1 + explodeFactor * 0.25);
     const progArr = progressAttr.array as Float32Array;
 
     for (let i = 0; i < WISP_COUNT; i++) {
@@ -225,7 +226,7 @@ export function SteamParticles({
       const progress = (t * s.speed + s.phase) % 1;
       progArr[i] = progress;
 
-      const radialDrift = s.radius * currentSpread * (0.48 + progress * 0.85);
+      const radialDrift = s.radius * currentSpread * (0.45 + progress * 0.8);
       const swayX = Math.sin(t * s.swayFreqX + s.angle) * s.swayAmp * (0.35 + progress);
       const swayZ = Math.cos(t * s.swayFreqZ + s.angle * 1.3) * s.swayAmp * (0.35 + progress);
 
@@ -233,14 +234,17 @@ export function SteamParticles({
       const y = currentBaseY + progress * s.maxHeight;
       const z = Math.sin(s.angle) * radialDrift + swayZ;
 
-      const growth = 0.58 + progress * 0.95;
+      const growth = 0.55 + progress * 0.85;
       const w = s.baseWidth * growth;
-      const h = s.baseHeight * (0.65 + progress * 0.8);
+      const h = s.baseHeight * (0.65 + progress * 0.72);
 
       dummy.position.set(x, y, z);
       // Camera-facing billboard with gentle organic Z-roll
       dummy.quaternion.copy(state.camera.quaternion);
-      rollQuat.setFromAxisAngle(zAxis, Math.sin(t * 0.4 + s.shaderSeed) * 0.22 + progress * s.rotSpeed);
+      rollQuat.setFromAxisAngle(
+        zAxis,
+        Math.sin(t * 0.4 + s.shaderSeed) * 0.2 + progress * s.rotSpeed
+      );
       dummy.quaternion.multiply(rollQuat);
       dummy.scale.set(w, h, 1);
       dummy.updateMatrix();

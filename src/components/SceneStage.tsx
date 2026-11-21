@@ -11,18 +11,10 @@ import React, {
 } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import {
-  ContactShadows,
   Environment,
   Lightformer,
   OrbitControls,
 } from '@react-three/drei';
-import {
-  Bloom,
-  EffectComposer,
-  ToneMapping,
-  Vignette,
-} from '@react-three/postprocessing';
-import { ToneMappingMode } from 'postprocessing';
 import { Layers, RotateCcw, RotateCw, X } from 'lucide-react';
 import * as THREE from 'three';
 
@@ -60,9 +52,85 @@ const STEAM_CONFIG: Record<DishId, { baseY: number; spread: number }> = {
   xiaolongbao: { baseY: 0.36, spread: 0.56 },
 };
 
+const noopRaycast = (): void => {};
+
+// Deterministic cached soft radial contact-shadow texture (zero per-frame FBO overrides)
+let cachedContactShadowTex: THREE.CanvasTexture | null = null;
+
+function getSoftContactShadowTexture(): THREE.CanvasTexture {
+  if (cachedContactShadowTex) return cachedContactShadowTex;
+
+  if (typeof document === 'undefined') {
+    cachedContactShadowTex = new THREE.CanvasTexture(undefined as unknown as HTMLCanvasElement);
+    return cachedContactShadowTex;
+  }
+
+  const size = 256;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+
+  if (ctx) {
+    const half = size / 2;
+    const grad = ctx.createRadialGradient(half, half, 0, half, half, half);
+    // Warm espresso (#2A1C12) Gaussian-like falloff — soft core, invisible perimeter
+    grad.addColorStop(0.0, 'rgba(42, 28, 18, 0.96)');
+    grad.addColorStop(0.32, 'rgba(42, 28, 18, 0.82)');
+    grad.addColorStop(0.56, 'rgba(42, 28, 18, 0.44)');
+    grad.addColorStop(0.78, 'rgba(42, 28, 18, 0.14)');
+    grad.addColorStop(1.0, 'rgba(42, 28, 18, 0.0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, size, size);
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.needsUpdate = true;
+  cachedContactShadowTex = tex;
+  return tex;
+}
+
+function BakedContactShadow({ exploded }: { exploded: boolean }) {
+  const matRef = useRef<THREE.MeshBasicMaterial>(null);
+  const shadowTex = useMemo(() => getSoftContactShadowTexture(), []);
+
+  useFrame((_, delta) => {
+    if (!matRef.current) return;
+    const dt = Math.min(delta, 0.05);
+    const factor = 1 - Math.exp(-6.5 * dt);
+    const targetOpacity = exploded ? 0.22 : 0.42;
+    matRef.current.opacity = THREE.MathUtils.lerp(
+      matRef.current.opacity,
+      targetOpacity,
+      factor
+    );
+  });
+
+  return (
+    <mesh
+      rotation={[-Math.PI / 2, 0, 0]}
+      position={[0, -0.536, 0]}
+      raycast={noopRaycast}
+      renderOrder={1}
+    >
+      <circleGeometry args={[1.75, 48]} />
+      <meshBasicMaterial
+        ref={matRef}
+        map={shadowTex}
+        transparent
+        opacity={exploded ? 0.22 : 0.42}
+        depthWrite={false}
+        polygonOffset
+        polygonOffsetFactor={-2}
+        polygonOffsetUnits={-2}
+      />
+    </mesh>
+  );
+}
+
 interface BoundaryProps {
   children: React.ReactNode;
-  onError?: () => void;
 }
 
 interface BoundaryState {
@@ -79,27 +147,12 @@ class CanvasFeatureErrorBoundary extends Component<BoundaryProps, BoundaryState>
     return { hasError: true };
   }
 
-  componentDidCatch() {
-    this.props.onError?.();
-  }
-
   render() {
     if (this.state.hasError) {
       return null;
     }
     return this.props.children;
   }
-}
-
-/** Restores renderer tone mapping only if post-processing fails inside its ErrorBoundary. */
-function ToneMappingFallbackSync({ postProcessingFailed }: { postProcessingFailed: boolean }) {
-  const { gl } = useThree();
-  useEffect(() => {
-    gl.toneMapping = postProcessingFailed
-      ? THREE.ACESFilmicToneMapping
-      : THREE.NoToneMapping;
-  }, [gl, postProcessingFailed]);
-  return null;
 }
 
 interface AtmosphereLightsProps {
@@ -464,7 +517,6 @@ export function SceneStage({
 }: SceneStageProps) {
   const [autoRotate, setAutoRotate] = useState(true);
   const [resetSignal, setResetSignal] = useState(0);
-  const [postProcessingFailed, setPostProcessingFailed] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
 
   const activePart = useMemo(() => {
@@ -484,10 +536,6 @@ export function SceneStage({
 
   const handleToggleAutoRotate = useCallback(() => {
     setAutoRotate((prev) => !prev);
-  }, []);
-
-  const handlePostProcessingError = useCallback(() => {
-    setPostProcessingFailed(true);
   }, []);
 
   const handleUserInteract = useCallback(() => {
@@ -514,6 +562,7 @@ export function SceneStage({
         }}
       />
 
+      {/* Native hardware MSAA + ACESFilmicToneMapping (zero postprocessing FBO flicker) */}
       <Canvas
         shadows="soft"
         dpr={[1, 2]}
@@ -521,13 +570,12 @@ export function SceneStage({
         gl={{
           antialias: true,
           alpha: true,
-          toneMapping: THREE.NoToneMapping,
+          toneMapping: THREE.ACESFilmicToneMapping,
+          toneMappingExposure: 1.06,
         }}
         onPointerMissed={() => onSelectPart(null)}
         className="h-full w-full cursor-grab active:cursor-grabbing"
       >
-        <ToneMappingFallbackSync postProcessingFailed={postProcessingFailed} />
-
         <CanvasFeatureErrorBoundary>
           <Suspense fallback={null}>
             <FoodStudioEnvironment />
@@ -538,6 +586,8 @@ export function SceneStage({
 
         <TableSurface surface={dish.atmosphere.surface} />
 
+        <BakedContactShadow exploded={exploded} />
+
         <DishShowcase
           dishId={dish.id}
           isHot={dish.isHot}
@@ -545,17 +595,6 @@ export function SceneStage({
           highlightedPart={highlightedPart}
           transitionDirection={transitionDirection}
           onSelectPart={onSelectPart}
-        />
-
-        <ContactShadows
-          key={`${dish.id}-${exploded ? 'e' : 'a'}`}
-          frames={32}
-          position={[0, -0.533, 0]}
-          opacity={0.44}
-          scale={6.4}
-          blur={2.0}
-          far={3.0}
-          color="#35251A"
         />
 
         <CameraRig
@@ -566,15 +605,17 @@ export function SceneStage({
           exploded={exploded}
           onUserInteract={handleUserInteract}
         />
-
-        <CanvasFeatureErrorBoundary onError={handlePostProcessingError}>
-          <EffectComposer multisampling={4}>
-            <Bloom luminanceThreshold={1.06} mipmapBlur intensity={0.22} />
-            <Vignette darkness={0.26} offset={0.32} />
-            <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
-          </EffectComposer>
-        </CanvasFeatureErrorBoundary>
       </Canvas>
+
+      {/* Whisper-soft pure CSS editorial vignette framing the 3D studio */}
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 z-[5]"
+        style={{
+          background:
+            'radial-gradient(ellipse 84% 80% at 50% 50%, rgba(28, 25, 23, 0) 58%, rgba(42, 28, 18, 0.11) 100%)',
+        }}
+      />
 
       {/* Active highlighted/focused layer pill (cleanly clear of upgraded top-left masthead & tagline) */}
       {activePart && (

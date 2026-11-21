@@ -366,7 +366,7 @@ export function CurryModel({
     });
     crust.center();
     displaceGeometryOrganic(crust, {
-      amplitude: 0.016,
+      amplitude: 0.013,
       frequency: 14.5,
       seed: 307,
       preserveSeam: true,
@@ -382,7 +382,7 @@ export function CurryModel({
     ps.quadraticCurveTo(-pw * 0.85, -ph, -pw, -ph * 0.2);
 
     const pork = new THREE.ExtrudeGeometry(ps, {
-      depth: 0.194,
+      depth: 0.212,
       bevelEnabled: false,
     });
     pork.center();
@@ -789,7 +789,7 @@ export function CurryModel({
                 />
               </mesh>
 
-              <mesh position={[0, 0.068, 0]} scale={[0.24, 0.018, 0.197]}>
+              <mesh position={[0, 0.068, 0]} scale={[0.24, 0.018, 0.22]}>
                 <boxGeometry args={[1, 1, 1]} />
                 <meshPhysicalMaterial
                   color="#FBF3E8"

@@ -536,7 +536,7 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
       preserveSeam: true,
     });
 
-    const pepGreaseGeo = new THREE.CircleGeometry(0.114, 22);
+    const pepGreaseGeo = new THREE.CircleGeometry(0.104, 22);
     pepGreaseGeo.rotateX(-Math.PI / 2);
 
     const basilLeafGeo = createBasilLeafGeometry();
@@ -668,6 +668,9 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
       reflectivity: 1.0,
       transparent: true,
       opacity: 0.78,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -1,
     });
 
     // Fresh veined sweet basil glowing warmly where backlit
@@ -844,7 +847,7 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
       return (
         <group
           key={`pep-${sliceIdx}-${idx}`}
-          position={[x, PIZZA_BASE_Y + 0.118, z]}
+          position={[x, PIZZA_BASE_Y + 0.128, z]}
           rotation={[0.03 * (idx % 2 === 0 ? 1 : -1), p.rotY ?? 0, 0.03]}
           scale={s}
         >
@@ -864,7 +867,7 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
           <mesh
             geometry={assets.geometries.pepGreaseGeo}
             material={assets.materials.pepGreaseMat}
-            position={[0, 0.017, 0]}
+            position={[0, 0.023, 0]}
             receiveShadow
           />
         </group>
@@ -879,7 +882,7 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
       return (
         <group
           key={`basil-${sliceIdx}-${idx}`}
-          position={[x, PIZZA_BASE_Y + 0.162, z]}
+          position={[x, PIZZA_BASE_Y + 0.178, z]}
           rotation={[0.08, b.rotY ?? 0, -0.06]}
           scale={s}
         >
@@ -915,7 +918,7 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
         <mesh
           geometry={assets.geometries.boardGeo}
           material={assets.materials.boardMat}
-          position={[0, -0.43, 0]}
+          position={[0, -0.436, 0]}
           castShadow
           receiveShadow
         />

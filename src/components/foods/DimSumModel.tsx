@@ -386,19 +386,20 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
       metalness: 0.0,
     });
 
-    // Translucent steam-dampened steamer parchment liner
-    const parchmentMat = new THREE.MeshPhysicalMaterial({
-      color: '#FAF4E8',
-      normalMap: parchmentNormal,
-      normalScale: new THREE.Vector2(0.5, 0.5),
-      roughness: 0.52,
-      metalness: 0.0,
-      clearcoat: 0.24,
-      clearcoatRoughness: 0.36,
-      transparent: true,
-      opacity: 0.88,
-      side: THREE.DoubleSide,
-    });
+    // Opaque backlit steam-dampened steamer parchment liner (uses real punched steam holes, zero transparent sorting)
+    const parchmentMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#FAF4E8',
+        normalMap: parchmentNormal,
+        normalScale: new THREE.Vector2(0.5, 0.5),
+        roughness: 0.54,
+        metalness: 0.0,
+        clearcoat: 0.22,
+        clearcoatRoughness: 0.36,
+        side: THREE.DoubleSide,
+      }),
+      { color: '#FFF5E2', intensity: 0.26, power: 2.6 }
+    );
 
     // Authentic soup-filled Xiaolongbao skin: backlit warm amber SSS + vertex soup-belly gradient
     const dumplingMat = applyFoodSSS(
@@ -591,7 +592,7 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
               key={idx}
               geometry={assets.geometries.slatGeos[idx]}
               material={assets.materials.bambooSlatMat}
-              position={[0, STEAMER_FLOOR_Y - 0.018, z]}
+              position={[0, STEAMER_FLOOR_Y - 0.022, z]}
               castShadow
               receiveShadow
             />
@@ -600,7 +601,7 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
           <mesh
             geometry={assets.geometries.parchmentGeo}
             material={assets.materials.parchmentMat}
-            position={[0, STEAMER_FLOOR_Y - 0.002, 0]}
+            position={[0, STEAMER_FLOOR_Y - 0.004, 0]}
             receiveShadow
           />
         </group>
@@ -622,7 +623,7 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
             ref={(el) => {
               dumplingRefs.current[i] = el;
             }}
-            position={[d.x, STEAMER_FLOOR_Y + 0.004, d.z]}
+            position={[d.x, STEAMER_FLOOR_Y + 0.011, d.z]}
             rotation={[0, d.rotY, 0]}
             scale={d.scale}
           >
@@ -679,7 +680,7 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
                 key={idx}
                 geometry={assets.geometries.gingerStripGeo}
                 material={assets.materials.gingerStripMat}
-                position={[strip.x, 0, strip.z]}
+                position={[strip.x, (idx % 3) * 0.0022, strip.z]}
                 rotation={[0, strip.rotY, 0]}
                 scale={strip.scale}
                 castShadow

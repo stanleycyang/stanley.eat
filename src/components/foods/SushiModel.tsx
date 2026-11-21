@@ -142,7 +142,7 @@ function generateMakiRiceGrains(
 
       localVec.set(
         Math.cos(angle) * r,
-        0.331 + (rand() - 0.5) * 0.006,
+        0.333 + (rand() - 0.5) * 0.005,
         Math.sin(angle) * r
       );
       localVec.applyEuler(euler);
@@ -714,9 +714,9 @@ interface MakiPlacement {
 }
 
 const MAKI_PLACEMENTS: MakiPlacement[] = [
-  { position: [0.68, BOARD_TOP_Y, 0.36], rotY: 0.35, tilt: [0.02, -0.02] },
-  { position: [1.06, BOARD_TOP_Y, 0.08], rotY: 1.55, tilt: [-0.02, 0.02] },
-  { position: [0.58, BOARD_TOP_Y, -0.26], rotY: 2.65, tilt: [0.015, 0.015] },
+  { position: [0.68, BOARD_TOP_Y + 0.005, 0.36], rotY: 0.35, tilt: [0.02, -0.02] },
+  { position: [1.06, BOARD_TOP_Y + 0.005, 0.08], rotY: 1.55, tilt: [-0.02, 0.02] },
+  { position: [0.58, BOARD_TOP_Y + 0.005, -0.26], rotY: 2.65, tilt: [0.015, 0.015] },
 ];
 
 const TOBIKO_OFFSETS: [number, number, number][] = [
@@ -793,7 +793,7 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
     avoShape.lineTo(-0.015, 0.01);
     avoShape.closePath();
     const makiAvocadoGeo = new THREE.ExtrudeGeometry(avoShape, {
-      depth: 0.345,
+      depth: 0.332,
       bevelEnabled: true,
       bevelThickness: 0.006,
       bevelSize: 0.005,
@@ -801,10 +801,10 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
     });
     makiAvocadoGeo.rotateX(-Math.PI / 2);
 
-    const makiCucSkinGeo = new THREE.BoxGeometry(0.082, 0.352, 0.082);
-    makiCucSkinGeo.translate(0, 0.176, 0);
-    const makiCucCoreGeo = new THREE.BoxGeometry(0.064, 0.358, 0.064);
-    makiCucCoreGeo.translate(0, 0.179, 0);
+    const makiCucSkinGeo = new THREE.BoxGeometry(0.082, 0.346, 0.082);
+    makiCucSkinGeo.translate(0, 0.181, 0);
+    const makiCucCoreGeo = new THREE.BoxGeometry(0.064, 0.346, 0.064);
+    makiCucCoreGeo.translate(0, 0.187, 0);
 
     const tobikoGeo = new THREE.SphereGeometry(0.019, 10, 8);
     const sesameGeo = new THREE.SphereGeometry(0.011, 8, 6);
@@ -1087,7 +1087,7 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
         <mesh
           geometry={assets.geometries.sasaLeafGeo}
           material={assets.materials.sasaMat}
-          position={[-0.86, BOARD_TOP_Y + 0.008, -0.34]}
+          position={[-0.86, BOARD_TOP_Y + 0.009, -0.34]}
           rotation={[0, -0.35, 0]}
           castShadow
           receiveShadow
@@ -1199,7 +1199,7 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
             <mesh
               geometry={assets.geometries.makiAvocadoGeo}
               material={assets.materials.avocadoMat}
-              position={[-0.025, 0.002, -0.015]}
+              position={[-0.025, 0.012, -0.015]}
               castShadow
               receiveShadow
             />
