@@ -1,11 +1,13 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { FoodModelProps } from '@/types/dish';
 import {
-  getOrganicNoiseBump,
+  applyFoodSSS,
+  displaceGeometryOrganic,
+  getOrganicNormalMap,
   getRiceGrainTextures,
   getWoodGrainTextures,
 } from '@/lib/proceduralTextures';
@@ -13,6 +15,156 @@ import { FoodLayer } from './FoodLayer';
 
 const BOARD_BASE_Y = -0.45;
 const BOARD_TOP_Y = -0.18;
+
+/** Deterministic PRNG for zero-allocation instanced sushi rice placement. */
+function mulberry32(seed: number): () => number {
+  let a = seed | 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+interface GrainTransform {
+  pos: [number, number, number];
+  rot: [number, number, number];
+  scale: [number, number, number];
+}
+
+interface SushiRiceGrainsProps {
+  grains: GrainTransform[];
+  geometry: THREE.BufferGeometry;
+  material: THREE.Material;
+}
+
+function SushiRiceGrains({ grains, geometry, material }: SushiRiceGrainsProps) {
+  const meshRef = useRef<THREE.InstancedMesh>(null);
+
+  useLayoutEffect(() => {
+    const mesh = meshRef.current;
+    if (!mesh) return;
+    const dummy = new THREE.Object3D();
+    for (let i = 0; i < grains.length; i++) {
+      const g = grains[i];
+      dummy.position.set(g.pos[0], g.pos[1], g.pos[2]);
+      dummy.rotation.set(g.rot[0], g.rot[1], g.rot[2]);
+      dummy.scale.set(g.scale[0], g.scale[1], g.scale[2]);
+      dummy.updateMatrix();
+      mesh.setMatrixAt(i, dummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    mesh.computeBoundingSphere();
+  }, [grains]);
+
+  return (
+    <instancedMesh
+      ref={meshRef}
+      args={[geometry, material, grains.length]}
+      castShadow
+      receiveShadow
+    />
+  );
+}
+
+/** Generates deterministic individual glistening rice grains hugging a nigiri shari pillow. */
+function generateNigiriRiceGrains(
+  pieces: { pos: [number, number, number]; rotY: number }[],
+  grainsPerPiece: number,
+  seed: number
+): GrainTransform[] {
+  const rand = mulberry32(seed);
+  const result: GrainTransform[] = [];
+
+  for (const piece of pieces) {
+    const cosR = Math.cos(piece.rotY);
+    const sinR = Math.sin(piece.rotY);
+
+    for (let i = 0; i < grainsPerPiece; i++) {
+      // Golden-angle azimuth around the shari pillow's visible lower & side flanks
+      const theta = i * 2.39996 + (rand() - 0.5) * 0.25;
+      // Cover visible side band where shari peeks cleanly below the draped fish neta
+      const uy = -0.52 + rand() * 0.92;
+      const horiz = Math.sqrt(Math.max(0.08, 1 - uy * uy));
+
+      const ux = Math.cos(theta) * horiz;
+      const uz = Math.sin(theta) * horiz;
+
+      let lx = ux * 0.272;
+      const squeeze = 1 - Math.abs(lx) * 0.18;
+      let lz = uz * 0.128 * squeeze;
+      const ly = Math.max(0.014, (uy < 0 ? uy * 0.055 : uy * 0.105) + 0.056);
+
+      // Push subtly outward so plump rice grains sit proudly on the shari silhouette
+      lx *= 1.02;
+      lz *= 1.03;
+
+      // Rotate into piece world orientation on the hinoki board
+      const wx = piece.pos[0] + lx * cosR + lz * sinR;
+      const wy = piece.pos[1] + ly;
+      const wz = piece.pos[2] - lx * sinR + lz * cosR;
+
+      const s = 0.85 + rand() * 0.35;
+      result.push({
+        pos: [wx, wy, wz],
+        rot: [
+          (rand() - 0.5) * 0.9,
+          piece.rotY + theta + (rand() - 0.5) * 1.4,
+          (rand() - 0.5) * 0.8,
+        ],
+        scale: [s * 1.05, s * 0.92, s * 0.95],
+      });
+    }
+  }
+  return result;
+}
+
+/** Generates deterministic individual glistening rice grains packing the top ring of each maki roll. */
+function generateMakiRiceGrains(
+  rolls: { position: [number, number, number]; rotY: number; tilt: [number, number] }[],
+  grainsPerRoll: number,
+  seed: number
+): GrainTransform[] {
+  const rand = mulberry32(seed);
+  const result: GrainTransform[] = [];
+  const euler = new THREE.Euler();
+  const localVec = new THREE.Vector3();
+
+  for (const roll of rolls) {
+    euler.set(roll.tilt[0], roll.rotY, roll.tilt[1]);
+
+    for (let i = 0; i < grainsPerRoll; i++) {
+      // Concentric packing inside the white sushi rice ring around avocado/cucumber center
+      const frac = (i + 0.5) / grainsPerRoll;
+      const r = 0.104 + Math.sqrt(frac) * 0.098 + (rand() - 0.5) * 0.008;
+      const angle = i * 2.39996 + (rand() - 0.5) * 0.22;
+
+      localVec.set(
+        Math.cos(angle) * r,
+        0.331 + (rand() - 0.5) * 0.006,
+        Math.sin(angle) * r
+      );
+      localVec.applyEuler(euler);
+
+      const s = 0.86 + rand() * 0.34;
+      result.push({
+        pos: [
+          roll.position[0] + localVec.x,
+          roll.position[1] + localVec.y,
+          roll.position[2] + localVec.z,
+        ],
+        rot: [
+          roll.tilt[0] + (rand() - 0.5) * 0.45,
+          roll.rotY + angle + Math.PI * 0.5 + (rand() - 0.5) * 1.2,
+          roll.tilt[1] + (rand() - 0.5) * 0.45,
+        ],
+        scale: [s * 1.1, s * 0.88, s * 0.96],
+      });
+    }
+  }
+  return result;
+}
 
 /** Creates rich coral-orange Atlantic salmon flesh with pale ivory fat marbling stripes. */
 function createSalmonTexture(): THREE.CanvasTexture | null {
@@ -30,7 +182,6 @@ function createSalmonTexture(): THREE.CanvasTexture | null {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 512, 256);
 
-  // Diagonal delicate pale-white fat marbling striations
   for (let i = -4; i < 14; i++) {
     const baseX = i * 44;
     ctx.strokeStyle = 'rgba(255, 240, 228, 0.78)';
@@ -74,7 +225,6 @@ function createTunaTexture(): THREE.CanvasTexture | null {
   ctx.fillStyle = grad;
   ctx.fillRect(0, 0, 512, 256);
 
-  // Subtle lean ruby muscle fibers
   for (let i = 0; i < 36; i++) {
     const y = (i / 36) * 256;
     ctx.strokeStyle = i % 2 === 0 ? 'rgba(126, 12, 22, 0.32)' : 'rgba(232, 82, 92, 0.18)';
@@ -221,11 +371,12 @@ function createRicePillowGeometry(): THREE.BufferGeometry {
   return geo;
 }
 
-/** Creates a thick, curved draped fish fillet (neta) that hugs a nigiri rice pillow. */
+/** Creates a thick, organically draped fish fillet (neta) that hugs a nigiri rice pillow. */
 function createDrapedFilletGeometry(
   length = 0.72,
   width = 0.285,
-  thickness = 0.052
+  thickness = 0.052,
+  seed = 401
 ): THREE.BufferGeometry {
   const segX = 24;
   const segZ = 14;
@@ -335,7 +486,15 @@ function createDrapedFilletGeometry(
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(allUvs, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  return geo;
+
+  // Subtle organic knife-sliced drape irregularity
+  return displaceGeometryOrganic(geo, {
+    amplitude: 0.005,
+    frequency: 6.8,
+    seed,
+    flattenBottomY: 0.008,
+    preserveSeam: true,
+  });
 }
 
 /** Creates a sleek black nori belt wrapping cleanly around a tuna nigiri waist. */
@@ -374,10 +533,10 @@ function createNoriBeltGeometry(): THREE.BufferGeometry {
   return geo;
 }
 
-/** Creates a sculpted spiral-peaked fresh grated wasabi mound. */
+/** Creates a sculpted coarse-grated spiral-peaked fresh hon-wasabi mound. */
 function createWasabiMoundGeometry(): THREE.BufferGeometry {
-  const radialSegs = 28;
-  const heightSegs = 18;
+  const radialSegs = 30;
+  const heightSegs = 20;
   const height = 0.21;
   const baseR = 0.165;
 
@@ -425,13 +584,21 @@ function createWasabiMoundGeometry(): THREE.BufferGeometry {
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  return geo;
+
+  // Coarse grated sharkskin-oroshigane organic roughness on the silhouette
+  return displaceGeometryOrganic(geo, {
+    amplitude: 0.0085,
+    frequency: 16,
+    seed: 547,
+    flattenBottomY: 0,
+    preserveSeam: true,
+  });
 }
 
-/** Creates a paper-thin undulating blush-pink pickled gari ginger petal. */
+/** Creates a paper-thin undulating blush-pink pickled gari ginger petal with delicate curled edges. */
 function createGingerPetalGeometry(): THREE.BufferGeometry {
-  const segU = 12;
-  const segV = 8;
+  const segU = 14;
+  const segV = 10;
   const width = 0.24;
   const height = 0.19;
 
@@ -474,7 +641,14 @@ function createGingerPetalGeometry(): THREE.BufferGeometry {
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  return geo;
+
+  return displaceGeometryOrganic(geo, {
+    amplitude: 0.008,
+    frequency: 11,
+    seed: 503,
+    flattenBottomY: 0,
+    preserveSeam: true,
+  });
 }
 
 /** Creates a delicate curved Japanese sasa bamboo garnish leaf for the hinoki board. */
@@ -523,6 +697,16 @@ function createSasaLeafGeometry(): THREE.BufferGeometry {
   return geo;
 }
 
+const SALMON_PIECES: { pos: [number, number, number]; rotY: number }[] = [
+  { pos: [-0.98, BOARD_TOP_Y, 0.34], rotY: 0.34 },
+  { pos: [-0.72, BOARD_TOP_Y, -0.22], rotY: 0.24 },
+];
+
+const TUNA_PIECES: { pos: [number, number, number]; rotY: number; hasBelt: boolean }[] = [
+  { pos: [-0.14, BOARD_TOP_Y, 0.34], rotY: 0.28, hasBelt: true },
+  { pos: [0.06, BOARD_TOP_Y, -0.24], rotY: 0.2, hasBelt: false },
+];
+
 interface MakiPlacement {
   position: [number, number, number];
   rotY: number;
@@ -557,6 +741,11 @@ const GINGER_PETALS: {
   { pos: [0.06, 0.018, -0.02], rot: [-0.22, 0.42, -0.12], scale: 0.9 },
 ];
 
+// Deterministic individual sushi rice grain transforms (~342 total grains across nigiri + maki)
+const SALMON_RICE_GRAINS = generateNigiriRiceGrains(SALMON_PIECES, 54, 1301);
+const TUNA_RICE_GRAINS = generateNigiriRiceGrains(TUNA_PIECES, 54, 2417);
+const MAKI_RICE_GRAINS = generateMakiRiceGrains(MAKI_PLACEMENTS, 42, 3529);
+
 export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodModelProps) {
   const platterGroupRef = useRef<THREE.Group>(null);
 
@@ -566,14 +755,14 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
   });
 
   const assets = useMemo(() => {
-    // Shared cached procedural PBR textures (DO NOT dispose these!)
+    // Shared cached 512x512 procedural PBR & Sobel normal maps (DO NOT dispose these!)
     const hinokiPbr = getWoodGrainTextures('hinoki');
     const ricePbr = getRiceGrainTextures();
-    const fishBump = getOrganicNoiseBump(61, 14);
-    const noriBump = getOrganicNoiseBump(83, 28);
-    const wasabiBump = getOrganicNoiseBump(97, 26);
-    const leafBump = getOrganicNoiseBump(53, 18);
-    const gingerBump = getOrganicNoiseBump(71, 12);
+    const fishNormal = getOrganicNormalMap(61, 14, 2.0);
+    const noriNormal = getOrganicNormalMap(83, 28, 2.6);
+    const wasabiNormal = getOrganicNormalMap(97, 26, 3.0);
+    const leafNormal = getOrganicNormalMap(53, 18, 2.2);
+    const gingerNormal = getOrganicNormalMap(71, 12, 1.8);
 
     // Local per-component color textures (disposed on unmount)
     const salmonTex = createSalmonTexture();
@@ -586,8 +775,12 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
     const sasaLeafGeo = createSasaLeafGeometry();
 
     const ricePillowGeo = createRicePillowGeometry();
-    const salmonFilletGeo = createDrapedFilletGeometry(0.74, 0.295, 0.052);
-    const tunaFilletGeo = createDrapedFilletGeometry(0.71, 0.285, 0.058);
+    // Sculpted individual short-grain Koshihikari rice ellipsoid for <instancedMesh>
+    const riceGrainGeo = new THREE.SphereGeometry(1, 8, 6);
+    riceGrainGeo.scale(0.0175, 0.0098, 0.0102);
+
+    const salmonFilletGeo = createDrapedFilletGeometry(0.74, 0.295, 0.052, 401);
+    const tunaFilletGeo = createDrapedFilletGeometry(0.71, 0.285, 0.058, 419);
     const noriBeltGeo = createNoriBeltGeometry();
 
     const makiNoriGeo = new THREE.CylinderGeometry(0.225, 0.225, 0.315, 32, 1, true);
@@ -620,12 +813,12 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
     const wasabiGeo = createWasabiMoundGeometry();
     const gingerPetalGeo = createGingerPetalGeometry();
 
-    // v2 Tactile PBR Materials
+    // v3 Look-Dev PBR Materials with 512x512 RGB Normal Maps & Backlit Food SSS
     const hinokiMat = new THREE.MeshStandardMaterial({
       color: '#F5E4C8',
       map: hinokiPbr.map,
-      bumpMap: hinokiPbr.bumpMap,
-      bumpScale: 0.012,
+      normalMap: hinokiPbr.normalMap,
+      normalScale: new THREE.Vector2(0.65, 0.65),
       roughnessMap: hinokiPbr.roughnessMap,
       roughness: 0.68,
       metalness: 0.0,
@@ -634,106 +827,141 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
     const getaFootMat = new THREE.MeshStandardMaterial({
       color: '#DEC094',
       map: hinokiPbr.map,
-      bumpMap: hinokiPbr.bumpMap,
-      bumpScale: 0.014,
+      normalMap: hinokiPbr.normalMap,
+      normalScale: new THREE.Vector2(0.75, 0.75),
       roughnessMap: hinokiPbr.roughnessMap,
       roughness: 0.76,
       metalness: 0.0,
     });
 
-    const sasaMat = new THREE.MeshPhysicalMaterial({
-      color: '#376B38',
-      bumpMap: leafBump,
-      bumpScale: 0.008,
-      roughness: 0.38,
-      clearcoat: 0.32,
-      clearcoatRoughness: 0.3,
-      side: THREE.DoubleSide,
-    });
+    const sasaMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#376B38',
+        normalMap: leafNormal,
+        normalScale: new THREE.Vector2(0.55, 0.55),
+        roughness: 0.38,
+        clearcoat: 0.32,
+        clearcoatRoughness: 0.3,
+        side: THREE.DoubleSide,
+      }),
+      { color: '#78C264', intensity: 0.34, power: 2.4 }
+    );
 
-    // Glistening vinegar-seasoned short-grain shari rice with individual grain bump + roughness
-    const riceMat = new THREE.MeshPhysicalMaterial({
-      color: '#FCF9F1',
-      bumpMap: ricePbr.bumpMap,
-      bumpScale: 0.024,
-      roughnessMap: ricePbr.roughnessMap,
-      roughness: 0.85,
-      metalness: 0.0,
-      clearcoat: 0.36,
-      clearcoatRoughness: 0.22,
-      sheen: 0.25,
-      sheenColor: new THREE.Color('#FFFDF7'),
-    });
+    // Base shari pillow bed with Sobel rice-grain normal map + warm SSS
+    const riceMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#FCF9F1',
+        normalMap: ricePbr.normalMap,
+        normalScale: new THREE.Vector2(0.9, 0.9),
+        roughnessMap: ricePbr.roughnessMap,
+        roughness: 0.8,
+        metalness: 0.0,
+        clearcoat: 0.42,
+        clearcoatRoughness: 0.2,
+        sheen: 0.24,
+        sheenColor: new THREE.Color('#FFFDF7'),
+      }),
+      { color: '#FFF7E4', intensity: 0.32, power: 2.5 }
+    );
 
-    // Fresh marbled Atlantic salmon fillet with soft fleshy sheen & nikiri glaze clearcoat
-    const salmonMat = new THREE.MeshPhysicalMaterial({
-      color: '#FFFFFF',
-      map: salmonTex,
-      bumpMap: fishBump,
-      bumpScale: 0.01,
-      roughness: 0.14,
-      metalness: 0.0,
-      clearcoat: 0.85,
-      clearcoatRoughness: 0.08,
-      sheen: 0.42,
-      sheenColor: new THREE.Color('#FFD9C6'),
-      sheenRoughness: 0.32,
-    });
+    // Instanced individual vinegar-glazed sushi rice grains with warm backlit SSS
+    const riceGrainMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#FFFDF7',
+        roughness: 0.22,
+        metalness: 0.0,
+        clearcoat: 0.5,
+        clearcoatRoughness: 0.16,
+        sheen: 0.22,
+        sheenColor: new THREE.Color('#FFFBF0'),
+      }),
+      { color: '#FFF7E4', intensity: 0.35, power: 2.4, scale: 1.1 }
+    );
 
-    // Jewel-like ruby-red akami maguro tuna fillet with glossy nikiri sheen & muscle grain
-    const tunaMat = new THREE.MeshPhysicalMaterial({
-      color: '#FFFFFF',
-      map: tunaTex,
-      bumpMap: fishBump,
-      bumpScale: 0.009,
-      roughness: 0.14,
-      metalness: 0.0,
-      clearcoat: 0.86,
-      clearcoatRoughness: 0.07,
-      sheen: 0.4,
-      sheenColor: new THREE.Color('#EC606A'),
-      sheenRoughness: 0.34,
-    });
+    // Fleshy backlit Atlantic salmon sashimi with warm coral SSS & wet nikiri sheen
+    const salmonMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#FFFFFF',
+        map: salmonTex,
+        normalMap: fishNormal,
+        normalScale: new THREE.Vector2(0.55, 0.55),
+        roughness: 0.14,
+        metalness: 0.0,
+        clearcoat: 0.85,
+        clearcoatRoughness: 0.08,
+        sheen: 0.38,
+        sheenColor: new THREE.Color('#FFD9C6'),
+        sheenRoughness: 0.32,
+      }),
+      { color: '#FF8C5A', intensity: 0.52, power: 2.3, scale: 1.15 }
+    );
+
+    // Fleshy backlit akami maguro tuna sashimi with deep ruby edge glow & wet sheen
+    const tunaMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#FFFFFF',
+        map: tunaTex,
+        normalMap: fishNormal,
+        normalScale: new THREE.Vector2(0.5, 0.5),
+        roughness: 0.14,
+        metalness: 0.0,
+        clearcoat: 0.86,
+        clearcoatRoughness: 0.07,
+        sheen: 0.36,
+        sheenColor: new THREE.Color('#EC606A'),
+        sheenRoughness: 0.34,
+      }),
+      { color: '#E03A44', intensity: 0.48, power: 2.5, scale: 1.12 }
+    );
 
     // Crisp matte textured toasted nori seaweed
     const noriMat = new THREE.MeshStandardMaterial({
       color: '#1E241E',
       map: noriTex,
-      bumpMap: noriBump,
-      bumpScale: 0.016,
-      roughness: 0.82,
+      normalMap: noriNormal,
+      normalScale: new THREE.Vector2(0.85, 0.85),
+      roughness: 0.84,
       metalness: 0.0,
       side: THREE.DoubleSide,
     });
 
-    const avocadoMat = new THREE.MeshPhysicalMaterial({
-      color: '#9BC53D',
-      bumpMap: gingerBump,
-      bumpScale: 0.006,
-      roughness: 0.3,
-      clearcoat: 0.28,
-      clearcoatRoughness: 0.3,
-    });
+    const avocadoMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#9BC53D',
+        normalMap: gingerNormal,
+        normalScale: new THREE.Vector2(0.45, 0.45),
+        roughness: 0.28,
+        clearcoat: 0.32,
+        clearcoatRoughness: 0.26,
+      }),
+      { color: '#D4EE72', intensity: 0.35, power: 2.6 }
+    );
 
     const cucSkinMat = new THREE.MeshStandardMaterial({
       color: '#468737',
-      bumpMap: leafBump,
-      bumpScale: 0.008,
-      roughness: 0.4,
+      normalMap: leafNormal,
+      normalScale: new THREE.Vector2(0.55, 0.55),
+      roughness: 0.38,
     });
 
-    const cucCoreMat = new THREE.MeshPhysicalMaterial({
-      color: '#CFE8A9',
-      roughness: 0.2,
-      clearcoat: 0.48,
-    });
+    const cucCoreMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#CFE8A9',
+        roughness: 0.18,
+        clearcoat: 0.52,
+      }),
+      { color: '#E5F7BE', intensity: 0.4, power: 2.3 }
+    );
 
-    const tobikoMat = new THREE.MeshPhysicalMaterial({
-      color: '#F26419',
-      roughness: 0.1,
-      clearcoat: 0.96,
-      clearcoatRoughness: 0.06,
-    });
+    const tobikoMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#F26419',
+        roughness: 0.08,
+        clearcoat: 0.96,
+        clearcoatRoughness: 0.05,
+      }),
+      { color: '#FF9848', intensity: 0.45, power: 2.2 }
+    );
 
     const sesameMat = new THREE.MeshStandardMaterial({
       color: '#F3DFB4',
@@ -741,33 +969,38 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
     });
 
     // Coarse freshly grated hon-wasabi paste mound
-    const wasabiMat = new THREE.MeshPhysicalMaterial({
-      color: '#86B049',
-      bumpMap: wasabiBump,
-      bumpScale: 0.028,
-      roughness: 0.88,
-      metalness: 0.0,
-      sheen: 0.22,
-      sheenColor: new THREE.Color('#C0DF86'),
-      sheenRoughness: 0.7,
-    });
+    const wasabiMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#86B049',
+        normalMap: wasabiNormal,
+        normalScale: new THREE.Vector2(1.05, 1.05),
+        roughness: 0.88,
+        metalness: 0.0,
+        sheen: 0.2,
+        sheenColor: new THREE.Color('#C0DF86'),
+        sheenRoughness: 0.7,
+      }),
+      { color: '#B4DC6C', intensity: 0.26, power: 2.8 }
+    );
 
-    // Translucent blush-pink pickled gari ginger petals
-    const gingerMat = new THREE.MeshPhysicalMaterial({
-      color: '#FFFFFF',
-      map: gingerTex,
-      bumpMap: gingerBump,
-      bumpScale: 0.006,
-      roughness: 0.18,
-      metalness: 0.0,
-      clearcoat: 0.55,
-      clearcoatRoughness: 0.14,
-      transmission: 0.28,
-      thickness: 0.08,
-      attenuationColor: new THREE.Color('#F29AB0'),
-      attenuationDistance: 0.32,
-      side: THREE.DoubleSide,
-    });
+    // Thin backlit blush-pink pickled gari ginger petals (warm SSS replacing glass transmission)
+    const gingerMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#FFFFFF',
+        map: gingerTex,
+        normalMap: gingerNormal,
+        normalScale: new THREE.Vector2(0.5, 0.5),
+        roughness: 0.22,
+        metalness: 0.0,
+        clearcoat: 0.55,
+        clearcoatRoughness: 0.16,
+        sheen: 0.35,
+        sheenColor: new THREE.Color('#FFD6E2'),
+        sheenRoughness: 0.4,
+        side: THREE.DoubleSide,
+      }),
+      { color: '#FFBACB', intensity: 0.65, power: 2.1, scale: 1.25 }
+    );
 
     return {
       localTextures: [salmonTex, tunaTex, noriTex, gingerTex],
@@ -776,6 +1009,7 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
         getaFootGeo,
         sasaLeafGeo,
         ricePillowGeo,
+        riceGrainGeo,
         salmonFilletGeo,
         tunaFilletGeo,
         noriBeltGeo,
@@ -794,6 +1028,7 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
         getaFootMat,
         sasaMat,
         riceMat,
+        riceGrainMat,
         salmonMat,
         tunaMat,
         noriMat,
@@ -854,6 +1089,7 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
           material={assets.materials.sasaMat}
           position={[-0.86, BOARD_TOP_Y + 0.008, -0.34]}
           rotation={[0, -0.35, 0]}
+          castShadow
           receiveShadow
         />
       </FoodLayer>
@@ -868,10 +1104,7 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
         highlighted={highlightedPart === 'salmon-nigiri'}
         onSelect={onSelectPart}
       >
-        {[
-          { pos: [-0.98, BOARD_TOP_Y, 0.34] as [number, number, number], rotY: 0.34 },
-          { pos: [-0.72, BOARD_TOP_Y, -0.22] as [number, number, number], rotY: 0.24 },
-        ].map((item, i) => (
+        {SALMON_PIECES.map((item, i) => (
           <group key={i} position={item.pos} rotation={[0, item.rotY, 0]}>
             <mesh
               geometry={assets.geometries.ricePillowGeo}
@@ -887,6 +1120,11 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
             />
           </group>
         ))}
+        <SushiRiceGrains
+          grains={SALMON_RICE_GRAINS}
+          geometry={assets.geometries.riceGrainGeo}
+          material={assets.materials.riceGrainMat}
+        />
       </FoodLayer>
 
       {/* 3. LEAN TUNA NIGIRI */}
@@ -899,18 +1137,7 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
         highlighted={highlightedPart === 'tuna-nigiri'}
         onSelect={onSelectPart}
       >
-        {[
-          {
-            pos: [-0.14, BOARD_TOP_Y, 0.34] as [number, number, number],
-            rotY: 0.28,
-            hasBelt: true,
-          },
-          {
-            pos: [0.06, BOARD_TOP_Y, -0.24] as [number, number, number],
-            rotY: 0.2,
-            hasBelt: false,
-          },
-        ].map((item, i) => (
+        {TUNA_PIECES.map((item, i) => (
           <group key={i} position={item.pos} rotation={[0, item.rotY, 0]}>
             <mesh
               geometry={assets.geometries.ricePillowGeo}
@@ -929,10 +1156,16 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
                 geometry={assets.geometries.noriBeltGeo}
                 material={assets.materials.noriMat}
                 castShadow
+                receiveShadow
               />
             )}
           </group>
         ))}
+        <SushiRiceGrains
+          grains={TUNA_RICE_GRAINS}
+          geometry={assets.geometries.riceGrainGeo}
+          material={assets.materials.riceGrainMat}
+        />
       </FoodLayer>
 
       {/* 4. AVOCADO CUCUMBER MAKI */}
@@ -967,18 +1200,23 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
               geometry={assets.geometries.makiAvocadoGeo}
               material={assets.materials.avocadoMat}
               position={[-0.025, 0.002, -0.015]}
+              castShadow
+              receiveShadow
             />
             <mesh
               geometry={assets.geometries.makiCucSkinGeo}
               material={assets.materials.cucSkinMat}
               position={[0.048, 0, 0.032]}
               rotation={[0, 0.4, 0]}
+              castShadow
+              receiveShadow
             />
             <mesh
               geometry={assets.geometries.makiCucCoreGeo}
               material={assets.materials.cucCoreMat}
               position={[0.048, 0, 0.032]}
               rotation={[0, 0.4, 0]}
+              receiveShadow
             />
             {TOBIKO_OFFSETS.map((off, ti) => (
               <mesh
@@ -986,6 +1224,7 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
                 geometry={assets.geometries.tobikoGeo}
                 material={assets.materials.tobikoMat}
                 position={off}
+                castShadow
               />
             ))}
             <mesh
@@ -1002,6 +1241,11 @@ export function SushiModel({ exploded, highlightedPart, onSelectPart }: FoodMode
             />
           </group>
         ))}
+        <SushiRiceGrains
+          grains={MAKI_RICE_GRAINS}
+          geometry={assets.geometries.riceGrainGeo}
+          material={assets.materials.riceGrainMat}
+        />
       </FoodLayer>
 
       {/* 5. WASABI & PICKLED GINGER */}

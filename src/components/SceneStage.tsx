@@ -10,10 +10,16 @@ import React, {
   useState,
 } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
-import { ContactShadows, Environment, OrbitControls } from '@react-three/drei';
+import {
+  ContactShadows,
+  Environment,
+  Lightformer,
+  OrbitControls,
+} from '@react-three/drei';
 import {
   Bloom,
   EffectComposer,
+  N8AO,
   ToneMapping,
   Vignette,
 } from '@react-three/postprocessing';
@@ -56,6 +62,7 @@ const STEAM_CONFIG: Record<DishId, { baseY: number; spread: number }> = {
 
 interface BoundaryProps {
   children: React.ReactNode;
+  onError?: () => void;
 }
 
 interface BoundaryState {
@@ -72,12 +79,27 @@ class CanvasFeatureErrorBoundary extends Component<BoundaryProps, BoundaryState>
     return { hasError: true };
   }
 
+  componentDidCatch() {
+    this.props.onError?.();
+  }
+
   render() {
     if (this.state.hasError) {
       return null;
     }
     return this.props.children;
   }
+}
+
+/** Restores renderer tone mapping only if post-processing fails inside its ErrorBoundary. */
+function ToneMappingFallbackSync({ postProcessingFailed }: { postProcessingFailed: boolean }) {
+  const { gl } = useThree();
+  useEffect(() => {
+    gl.toneMapping = postProcessingFailed
+      ? THREE.ACESFilmicToneMapping
+      : THREE.NoToneMapping;
+  }, [gl, postProcessingFailed]);
+  return null;
 }
 
 interface AtmosphereLightsProps {
@@ -119,43 +141,98 @@ function AtmosphereLights({ atmosphere }: AtmosphereLightsProps) {
 
   return (
     <>
+      {/* Restrained ambient & hemisphere fill so sculptural shadows keep editorial depth */}
       <ambientLight
         ref={ambientLightRef}
-        intensity={0.36}
+        intensity={0.09}
         color={atmosphere.ambientTint}
       />
       <hemisphereLight
         ref={hemiLightRef}
-        args={[atmosphere.ambientTint, '#C8B49E', 0.68]}
+        args={[atmosphere.ambientTint, '#A89480', 0.16]}
       />
+
+      {/* Sculptural 3/4 side-key with tight 2048px soft percentage shadows */}
       <directionalLight
         ref={keyLightRef}
         castShadow
-        position={[4.5, 7.5, 4.5]}
+        position={[3.8, 6.2, 2.2]}
         intensity={atmosphere.keyLightIntensity}
         color={atmosphere.keyLightColor}
-        shadow-mapSize={[1024, 1024]}
-        shadow-bias={-0.0004}
-        shadow-normalBias={0.015}
+        shadow-mapSize={[2048, 2048]}
+        shadow-radius={3}
+        shadow-bias={-0.00025}
+        shadow-normalBias={0.012}
         shadow-camera-near={1}
-        shadow-camera-far={20}
-        shadow-camera-left={-3.6}
-        shadow-camera-right={3.6}
-        shadow-camera-top={3.6}
-        shadow-camera-bottom={-3.6}
+        shadow-camera-far={18}
+        shadow-camera-left={-2.4}
+        shadow-camera-right={2.4}
+        shadow-camera-top={2.4}
+        shadow-camera-bottom={-2.4}
       />
-      {/* Cool studio rim fill + subtle warm back bounce */}
+
+      {/* Warm back-rim directional light to ignite SSS backlit glow & wet edges */}
       <directionalLight
-        position={[-4.2, 4.0, -3.5]}
-        intensity={0.62}
-        color="#EAF1FF"
-      />
-      <directionalLight
-        position={[2.0, 1.8, -4.5]}
-        intensity={0.34}
-        color="#FFE1C6"
+        position={[-3.2, 3.6, -3.8]}
+        intensity={0.75}
+        color="#FFE6C8"
       />
     </>
+  );
+}
+
+/** Procedural Food Photography Softbox & Negative-Fill Studio Rig (zero external HDRI fetch). */
+function FoodStudioEnvironment() {
+  return (
+    <Environment resolution={256} frames={1}>
+      {/* Overhead warm diffused softbox */}
+      <Lightformer
+        form="rect"
+        intensity={2.2}
+        color="#FFF9EE"
+        position={[0, 6.5, 0.4]}
+        rotation={[Math.PI / 2, 0, 0]}
+        scale={[7.2, 5.2, 1]}
+      />
+
+      {/* 3/4 Back-left warm rim strip — makes wet chili oil, broth & translucent edges gleam */}
+      <Lightformer
+        form="rect"
+        intensity={3.4}
+        color="#FFEAD0"
+        position={[-5.2, 3.6, -4.4]}
+        target={[0, 0, 0]}
+        scale={[2.6, 5.8, 1]}
+      />
+
+      {/* Soft cool right fill card */}
+      <Lightformer
+        form="rect"
+        intensity={0.85}
+        color="#E8F0FF"
+        position={[5.8, 2.8, 1.4]}
+        target={[0, 0, 0]}
+        scale={[4.8, 3.8, 1]}
+      />
+
+      {/* Dark negative-fill cards on front-left & right-rear for crisp specular contrast */}
+      <Lightformer
+        form="rect"
+        intensity={0.12}
+        color="#14100E"
+        position={[-5.0, 1.8, 3.6]}
+        target={[0, 0, 0]}
+        scale={[5.6, 4.4, 1]}
+      />
+      <Lightformer
+        form="rect"
+        intensity={0.12}
+        color="#14100E"
+        position={[4.6, 2.2, -4.6]}
+        target={[0, 0, 0]}
+        scale={[5.6, 4.4, 1]}
+      />
+    </Environment>
   );
 }
 
@@ -299,7 +376,6 @@ function CameraRig({
       isGlidingRef.current = true;
       hadFocusRef.current = true;
     } else if (hadFocusRef.current || dishChanged) {
-      // Returning from a focused inspection or switching dishes restores default framing
       desiredPos.set(...DEFAULT_CAMERA_POSITION);
       desiredTarget.set(...DEFAULT_CAMERA_TARGET);
       isGlidingRef.current = true;
@@ -330,7 +406,6 @@ function CameraRig({
     }
   });
 
-  // Pause auto-rotate while actively inspecting a click-focused part
   const effectiveAutoRotate = autoRotate && !focusedPartData;
 
   return (
@@ -365,6 +440,7 @@ export function SceneStage({
 }: SceneStageProps) {
   const [autoRotate, setAutoRotate] = useState(true);
   const [resetSignal, setResetSignal] = useState(0);
+  const [postProcessingFailed, setPostProcessingFailed] = useState(false);
 
   const activePart = useMemo(() => {
     const id = highlightedPart ?? focusedPart;
@@ -383,6 +459,10 @@ export function SceneStage({
 
   const handleToggleAutoRotate = useCallback(() => {
     setAutoRotate((prev) => !prev);
+  }, []);
+
+  const handlePostProcessingError = useCallback(() => {
+    setPostProcessingFailed(true);
   }, []);
 
   const backdropInner = dish.atmosphere?.backdropInner ?? '#FFFDF9';
@@ -406,21 +486,22 @@ export function SceneStage({
       />
 
       <Canvas
-        shadows
+        shadows="percentage"
         dpr={[1, 2]}
         camera={{ position: DEFAULT_CAMERA_POSITION, fov: 36 }}
         gl={{
           antialias: true,
           alpha: true,
-          toneMapping: THREE.ACESFilmicToneMapping,
-          toneMappingExposure: 1.04,
+          toneMapping: THREE.NoToneMapping,
         }}
         onPointerMissed={() => onSelectPart(null)}
         className="h-full w-full cursor-grab active:cursor-grabbing"
       >
+        <ToneMappingFallbackSync postProcessingFailed={postProcessingFailed} />
+
         <CanvasFeatureErrorBoundary>
           <Suspense fallback={null}>
-            <Environment preset="studio" />
+            <FoodStudioEnvironment />
           </Suspense>
         </CanvasFeatureErrorBoundary>
 
@@ -438,11 +519,11 @@ export function SceneStage({
 
         <ContactShadows
           position={[0, -0.535, 0]}
-          opacity={0.42}
-          scale={6.8}
-          blur={2.2}
-          far={3.2}
-          color="#3B2B1E"
+          opacity={0.44}
+          scale={6.4}
+          blur={2.0}
+          far={3.0}
+          color="#35251A"
         />
 
         <CameraRig
@@ -453,10 +534,16 @@ export function SceneStage({
           exploded={exploded}
         />
 
-        <CanvasFeatureErrorBoundary>
+        <CanvasFeatureErrorBoundary onError={handlePostProcessingError}>
           <EffectComposer multisampling={4}>
-            <Bloom luminanceThreshold={0.92} mipmapBlur intensity={0.25} />
-            <Vignette darkness={0.22} offset={0.35} />
+            <N8AO
+              aoRadius={0.28}
+              intensity={1.65}
+              distanceFalloff={0.8}
+              quality="medium"
+            />
+            <Bloom luminanceThreshold={1.06} mipmapBlur intensity={0.22} />
+            <Vignette darkness={0.26} offset={0.32} />
             <ToneMapping mode={ToneMappingMode.ACES_FILMIC} />
           </EffectComposer>
         </CanvasFeatureErrorBoundary>

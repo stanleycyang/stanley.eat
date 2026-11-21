@@ -5,7 +5,9 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { FoodModelProps } from '@/types/dish';
 import {
-  getOrganicNoiseBump,
+  applyFoodSSS,
+  displaceGeometryOrganic,
+  getOrganicNormalMap,
   getPankoCrustTextures,
   getWoodGrainTextures,
 } from '@/lib/proceduralTextures';
@@ -88,10 +90,10 @@ function createWedgeShape(radius: number, halfAngle: number, tipOffset = 0.018):
   return shape;
 }
 
-/** Creates an organic puffy cornicione rim along a slice's 60-degree arc. */
-function createCornicioneGeometry(seed: number): THREE.BufferGeometry {
-  const radialSegs = 16;
-  const tubularSegs = 28;
+/** Creates an organic puffy cornicione rim along a slice's 60-degree arc with asymmetric blisters. */
+function createCornicioneGeometry(seed: number, sliceIdx: number): THREE.BufferGeometry {
+  const radialSegs = 20;
+  const tubularSegs = 32;
   const arcHalf = HALF_ARC - SLICE_GAP * 0.7;
 
   const positions: number[] = [];
@@ -105,17 +107,15 @@ function createCornicioneGeometry(seed: number): THREE.BufferGeometry {
     const sinT = Math.sin(theta);
 
     const endCap = Math.sin(u * Math.PI);
-    const endTaper = 0.76 + 0.24 * Math.pow(endCap, 0.35);
+    const endTaper = 0.78 + 0.22 * Math.pow(endCap, 0.35);
 
-    const puff =
-      1 +
-      Math.sin(u * Math.PI * 3 + seed * 2.1) * 0.14 +
-      Math.cos(u * Math.PI * 5 + seed * 4.7) * 0.07;
+    // Subtle baseline rise; asymmetric wood-fired air blisters come from displaceGeometryOrganic
+    const puff = 1 + Math.sin(u * Math.PI * 2.5 + seed * 2.1) * 0.1;
 
     const tubeRx = 0.155 * puff * endTaper;
     const tubeRy = 0.118 * puff * endTaper;
-    const centerR = RIM_CENTER_RADIUS + Math.sin(u * Math.PI * 2 + seed) * 0.015;
-    const centerY = PIZZA_BASE_Y + 0.095 + Math.sin(u * Math.PI * 3 + seed * 1.3) * 0.01;
+    const centerR = RIM_CENTER_RADIUS + Math.sin(u * Math.PI * 2 + seed) * 0.012;
+    const centerY = PIZZA_BASE_Y + 0.095;
 
     for (let j = 0; j <= radialSegs; j++) {
       const v = j / radialSegs;
@@ -151,10 +151,18 @@ function createCornicioneGeometry(seed: number): THREE.BufferGeometry {
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
-  return geo;
+
+  // Asymmetric wood-fired cornicione air blisters while preserving watertight seam & flat base
+  return displaceGeometryOrganic(geo, {
+    amplitude: 0.024,
+    frequency: 4.8,
+    seed: 103 + sliceIdx * 37,
+    flattenBottomY: PIZZA_BASE_Y + 0.008,
+    preserveSeam: true,
+  });
 }
 
-/** Creates a shallow curled Neapolitan cup-and-char pepperoni LatheGeometry. */
+/** Creates a ruffled shallow curled Neapolitan cup-and-char pepperoni LatheGeometry. */
 function createPepperoniCupGeometry(): THREE.BufferGeometry {
   const points: THREE.Vector2[] = [
     new THREE.Vector2(0.0, 0.0),
@@ -169,13 +177,20 @@ function createPepperoniCupGeometry(): THREE.BufferGeometry {
     new THREE.Vector2(0.085, 0.014),
     new THREE.Vector2(0.0, 0.013),
   ];
-  return new THREE.LatheGeometry(points, 24);
+  const geo = new THREE.LatheGeometry(points, 28);
+  return displaceGeometryOrganic(geo, {
+    amplitude: 0.0055,
+    frequency: 12.5,
+    seed: 311,
+    flattenBottomY: 0,
+    preserveSeam: true,
+  });
 }
 
 /** Creates an organic cupped & folded fresh sweet basil leaf BufferGeometry. */
 function createBasilLeafGeometry(): THREE.BufferGeometry {
-  const lengthSegs = 12;
-  const widthSegs = 8;
+  const lengthSegs = 14;
+  const widthSegs = 10;
   const leafLength = 0.34;
   const leafHalfWidth = 0.125;
 
@@ -192,7 +207,9 @@ function createBasilLeafGeometry(): THREE.BufferGeometry {
     for (let j = 0; j <= widthSegs; j++) {
       const v = j / widthSegs;
       const s = v * 2 - 1;
-      const foldY = Math.abs(s) * 0.028 * widthProfile - s * s * 0.014 * widthProfile;
+      // Organic pillowy vein undulation between leaf midrib and margin
+      const ribPuff = Math.sin(u * Math.PI * 5) * 0.005 * (1 - Math.abs(s)) * widthProfile;
+      const foldY = Math.abs(s) * 0.028 * widthProfile - s * s * 0.014 * widthProfile + ribPuff;
       const x = (u - 0.45) * leafLength;
       const z = s * halfW;
       const y = archY + foldY;
@@ -221,7 +238,7 @@ function createBasilLeafGeometry(): THREE.BufferGeometry {
   return geo;
 }
 
-/** Creates an organic melted mozzarella puddle ExtrudeGeometry. */
+/** Creates an organic melted mozzarella puddle ExtrudeGeometry with natural surface swell. */
 function createCheeseBlobGeometry(
   rx: number,
   rz: number,
@@ -229,7 +246,7 @@ function createCheeseBlobGeometry(
   thickness = 0.026
 ): THREE.BufferGeometry {
   const shape = new THREE.Shape();
-  const pts = 24;
+  const pts = 28;
   for (let i = 0; i <= pts; i++) {
     const a = (i / pts) * Math.PI * 2;
     const wobble =
@@ -250,13 +267,20 @@ function createCheeseBlobGeometry(
     bevelThickness: 0.012,
     bevelSize: 0.016,
     bevelSegments: 3,
-    curveSegments: 12,
+    curveSegments: 14,
   });
   geo.rotateX(-Math.PI / 2);
-  return geo;
+
+  return displaceGeometryOrganic(geo, {
+    amplitude: 0.01,
+    frequency: 6.2,
+    seed: Math.round(seed * 41) + 211,
+    flattenBottomY: -0.002,
+    preserveSeam: true,
+  });
 }
 
-/** Flour-dusted blistered Neapolitan dough albedo map paired with shared PBR crust bump/roughness. */
+/** Flour-dusted blistered Neapolitan dough albedo map paired with shared PBR crust normal/roughness. */
 function createDoughTexture(): THREE.CanvasTexture | null {
   if (typeof document === 'undefined') return null;
   const canvas = document.createElement('canvas');
@@ -268,18 +292,15 @@ function createDoughTexture(): THREE.CanvasTexture | null {
   ctx.fillStyle = '#D99B52';
   ctx.fillRect(0, 0, 512, 512);
 
-  // Warm oven browning & semolina flour mottling
   for (let i = 0; i < 320; i++) {
     const x = ((i * 73.1) % 1) * 512;
     const y = ((i * 39.7 + 0.13 * (i % 11)) % 1) * 512;
     const r = 5 + (i % 20);
     const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
     if (i % 6 === 0) {
-      // Toasted dark-amber oven kiss
       grad.addColorStop(0, 'rgba(116, 62, 24, 0.42)');
       grad.addColorStop(1, 'rgba(116, 62, 24, 0)');
     } else if (i % 3 === 0) {
-      // Soft matte semolina flour dusting
       grad.addColorStop(0, 'rgba(252, 236, 206, 0.36)');
       grad.addColorStop(1, 'rgba(252, 236, 206, 0)');
     } else {
@@ -311,7 +332,6 @@ function createPepperoniTexture(): THREE.CanvasTexture | null {
   ctx.fillStyle = '#B8291E';
   ctx.fillRect(0, 0, 256, 256);
 
-  // Subtle dark paprika mottling
   for (let i = 0; i < 40; i++) {
     const x = ((i * 0.7548) % 1) * 256;
     const y = ((i * 0.5698) % 1) * 256;
@@ -321,7 +341,6 @@ function createPepperoniTexture(): THREE.CanvasTexture | null {
     ctx.fill();
   }
 
-  // Marbled cured fat flecks
   for (let i = 0; i < 72; i++) {
     const x = ((i * 0.6180339) % 1) * 256;
     const y = ((i * 0.381966 + 0.17 * (i % 7)) % 1) * 256;
@@ -348,7 +367,6 @@ interface SlicePlacement {
   rotY?: number;
 }
 
-// 14 curled pepperoni cups: 3 on slice 0 (hero), 11 across slices 1..5
 const PEPPERONI_PLACEMENTS: SlicePlacement[] = [
   { sliceIndex: 0, r: 0.48, phi: -0.04, scale: 0.96, rotY: 0.3 },
   { sliceIndex: 0, r: 0.88, phi: -0.22, scale: 1.04, rotY: 1.4 },
@@ -366,7 +384,6 @@ const PEPPERONI_PLACEMENTS: SlicePlacement[] = [
   { sliceIndex: 5, r: 0.92, phi: 0.16, scale: 1.02, rotY: 2.3 },
 ];
 
-// 7 organic curved basil leaves: 1 on hero slice, 6 across main slices
 const BASIL_PLACEMENTS: SlicePlacement[] = [
   { sliceIndex: 0, r: 0.72, phi: 0.03, scale: 1.08, rotY: 0.45 },
   { sliceIndex: 1, r: 0.76, phi: -0.04, scale: 1.0, rotY: 1.35 },
@@ -464,14 +481,14 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
   }, []);
 
   const assets = useMemo(() => {
-    // Shared cached procedural PBR textures (DO NOT dispose these!)
+    // Shared cached 512x512 procedural PBR & Sobel normal maps (DO NOT dispose these!)
     const boardWood = getWoodGrainTextures('cedar');
     const crustPbr = getPankoCrustTextures();
-    const charBump = getOrganicNoiseBump(17, 12);
-    const sauceBump = getOrganicNoiseBump(31, 14);
-    const cheeseBump = getOrganicNoiseBump(43, 8);
-    const pepBump = getOrganicNoiseBump(59, 18);
-    const basilBump = getOrganicNoiseBump(77, 16);
+    const charNormal = getOrganicNormalMap(17, 12, 2.8);
+    const sauceNormal = getOrganicNormalMap(31, 14, 2.2);
+    const cheeseNormal = getOrganicNormalMap(43, 8, 1.8);
+    const pepNormal = getOrganicNormalMap(59, 18, 2.5);
+    const basilNormal = getOrganicNormalMap(77, 16, 2.4);
 
     // Local per-component color textures (disposed on unmount)
     const doughTex = createDoughTexture();
@@ -500,7 +517,7 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
     sauceSliceGeo.rotateX(-Math.PI / 2);
 
     const rimGeos = Array.from({ length: SLICE_COUNT }, (_, i) =>
-      createCornicioneGeometry(i + 1.3)
+      createCornicioneGeometry(i + 1.3, i)
     );
 
     const cheeseGeos = [
@@ -510,35 +527,45 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
     ];
 
     const pepCupGeo = createPepperoniCupGeometry();
-    const pepCharRimGeo = new THREE.TorusGeometry(0.176, 0.013, 10, 24);
+    const pepCharRimGeo = new THREE.TorusGeometry(0.176, 0.013, 12, 28);
     pepCharRimGeo.rotateX(Math.PI / 2);
+    displaceGeometryOrganic(pepCharRimGeo, {
+      amplitude: 0.004,
+      frequency: 12.5,
+      seed: 311,
+      preserveSeam: true,
+    });
 
-    const pepGreaseGeo = new THREE.CircleGeometry(0.112, 20);
+    const pepGreaseGeo = new THREE.CircleGeometry(0.114, 22);
     pepGreaseGeo.rotateX(-Math.PI / 2);
 
     const basilLeafGeo = createBasilLeafGeometry();
     const basilStemGeo = new THREE.CylinderGeometry(0.005, 0.007, 0.24, 6);
-    const blisterGeo = new THREE.SphereGeometry(1, 12, 10);
-    const bubbleGeo = new THREE.SphereGeometry(0.036, 12, 10);
+    const blisterGeo = new THREE.SphereGeometry(1, 14, 10);
+    const bubbleGeo = displaceGeometryOrganic(new THREE.SphereGeometry(0.038, 14, 12), {
+      amplitude: 0.005,
+      frequency: 14,
+      seed: 241,
+      preserveSeam: true,
+    });
     const boardGeo = new THREE.CylinderGeometry(1.64, 1.68, 0.055, 48);
 
-    // v2 Tactile PBR Materials
+    // v3 Look-Dev PBR Materials with 512x512 RGB Normal Maps & Backlit Food SSS
     const boardMat = new THREE.MeshStandardMaterial({
       color: '#D8B392',
       map: boardWood.map,
-      bumpMap: boardWood.bumpMap,
-      bumpScale: 0.014,
+      normalMap: boardWood.normalMap,
+      normalScale: new THREE.Vector2(0.7, 0.7),
       roughnessMap: boardWood.roughnessMap,
       roughness: 0.85,
       metalness: 0.02,
     });
 
-    // Flour-dusted blistered baked base & puffy cornicione
     const crustBaseMat = new THREE.MeshStandardMaterial({
       color: '#EDD0A2',
       map: doughTex,
-      bumpMap: crustPbr.bumpMap,
-      bumpScale: 0.016,
+      normalMap: crustPbr.normalMap,
+      normalScale: new THREE.Vector2(0.8, 0.8),
       roughnessMap: crustPbr.roughnessMap,
       roughness: 0.92,
       metalness: 0.0,
@@ -547,8 +574,8 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
     const cornicioneMat = new THREE.MeshStandardMaterial({
       color: '#E6BD83',
       map: doughTex,
-      bumpMap: crustPbr.bumpMap,
-      bumpScale: 0.024,
+      normalMap: crustPbr.normalMap,
+      normalScale: new THREE.Vector2(1.05, 1.05),
       roughnessMap: crustPbr.roughnessMap,
       roughness: 0.94,
       metalness: 0.0,
@@ -556,100 +583,110 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
 
     // Ultra-matte charred leopard-spot blisters contrasting against warm baked dough
     const charBlisterMat = new THREE.MeshStandardMaterial({
-      color: '#2B1A10',
-      bumpMap: charBump,
-      bumpScale: 0.028,
-      roughness: 0.98,
+      color: '#291910',
+      normalMap: charNormal,
+      normalScale: new THREE.Vector2(0.95, 0.95),
+      roughness: 0.96,
       metalness: 0.0,
     });
 
     // Deep crushed San Marzano tomato sauce with glossy extra-virgin olive-oil sheen
     const sauceMat = new THREE.MeshPhysicalMaterial({
       color: '#B81F14',
-      bumpMap: sauceBump,
-      bumpScale: 0.018,
-      roughness: 0.18,
+      normalMap: sauceNormal,
+      normalScale: new THREE.Vector2(0.65, 0.65),
+      roughness: 0.16,
       metalness: 0.0,
-      clearcoat: 0.88,
-      clearcoatRoughness: 0.1,
+      clearcoat: 0.92,
+      clearcoatRoughness: 0.08,
     });
 
     const sauceChunkMat = new THREE.MeshPhysicalMaterial({
       color: '#91160E',
-      bumpMap: sauceBump,
-      bumpScale: 0.022,
-      roughness: 0.24,
-      clearcoat: 0.72,
+      normalMap: sauceNormal,
+      normalScale: new THREE.Vector2(0.8, 0.8),
+      roughness: 0.22,
+      clearcoat: 0.78,
     });
 
-    // Creamy melted Fior di Latte mozzarella with warm subsurface sheen
-    const cheeseMat = new THREE.MeshPhysicalMaterial({
-      color: '#FCF5E2',
-      bumpMap: cheeseBump,
-      bumpScale: 0.01,
-      roughness: 0.24,
-      metalness: 0.0,
-      clearcoat: 0.55,
-      clearcoatRoughness: 0.18,
-      sheen: 0.52,
-      sheenColor: new THREE.Color('#FFF2CC'),
-      sheenRoughness: 0.35,
-    });
+    // Creamy melted Fior di Latte mozzarella with warm backlit SSS translucency
+    const cheeseMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#FCF5E2',
+        normalMap: cheeseNormal,
+        normalScale: new THREE.Vector2(0.55, 0.55),
+        roughness: 0.24,
+        metalness: 0.0,
+        clearcoat: 0.58,
+        clearcoatRoughness: 0.16,
+        sheen: 0.45,
+        sheenColor: new THREE.Color('#FFF2CC'),
+        sheenRoughness: 0.35,
+      }),
+      { color: '#FFF2CE', intensity: 0.45, power: 2.6, scale: 1.15 }
+    );
 
-    // Subtle golden-browned melted mozzarella bubbles
-    const cheeseBubbleMat = new THREE.MeshPhysicalMaterial({
-      color: '#DD9B44',
-      bumpMap: cheeseBump,
-      bumpScale: 0.014,
-      roughness: 0.34,
-      clearcoat: 0.52,
-      clearcoatRoughness: 0.22,
-    });
+    const cheeseBubbleMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#DD9B44',
+        normalMap: cheeseNormal,
+        normalScale: new THREE.Vector2(0.65, 0.65),
+        roughness: 0.32,
+        clearcoat: 0.54,
+        clearcoatRoughness: 0.2,
+      }),
+      { color: '#FFCF86', intensity: 0.28, power: 2.8, scale: 1.0 }
+    );
 
     // High-contrast cup-and-char pepperoni: cured spiced body, dark crispy rim, mirror oil pool
     const pepMat = new THREE.MeshPhysicalMaterial({
       color: '#C22C1F',
       map: pepTex,
-      bumpMap: pepBump,
-      bumpScale: 0.012,
-      roughness: 0.22,
+      normalMap: pepNormal,
+      normalScale: new THREE.Vector2(0.75, 0.75),
+      roughness: 0.2,
       metalness: 0.02,
-      clearcoat: 0.82,
-      clearcoatRoughness: 0.14,
+      clearcoat: 0.86,
+      clearcoatRoughness: 0.12,
     });
 
     const pepCharMat = new THREE.MeshStandardMaterial({
-      color: '#5C110B',
-      bumpMap: pepBump,
-      bumpScale: 0.018,
+      color: '#5A100A',
+      normalMap: pepNormal,
+      normalScale: new THREE.Vector2(0.95, 0.95),
       roughness: 0.68,
       metalness: 0.02,
     });
 
     const pepGreaseMat = new THREE.MeshPhysicalMaterial({
-      color: '#DF5218',
-      roughness: 0.08,
+      color: '#DF5016',
+      roughness: 0.04,
       metalness: 0.04,
       clearcoat: 1.0,
-      clearcoatRoughness: 0.03,
+      clearcoatRoughness: 0.02,
+      ior: 1.46,
+      reflectivity: 1.0,
       transparent: true,
-      opacity: 0.74,
+      opacity: 0.78,
     });
 
-    // Fresh sweet basil with organic leaf-vein bump and soft natural wax sheen
-    const basilMat = new THREE.MeshPhysicalMaterial({
-      color: '#347A26',
-      bumpMap: basilBump,
-      bumpScale: 0.015,
-      roughness: 0.34,
-      metalness: 0.0,
-      clearcoat: 0.32,
-      clearcoatRoughness: 0.28,
-      sheen: 0.3,
-      sheenColor: new THREE.Color('#74C35C'),
-      sheenRoughness: 0.45,
-      side: THREE.DoubleSide,
-    });
+    // Fresh veined sweet basil glowing warmly where backlit
+    const basilMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#347A26',
+        normalMap: basilNormal,
+        normalScale: new THREE.Vector2(0.75, 0.75),
+        roughness: 0.32,
+        metalness: 0.0,
+        clearcoat: 0.34,
+        clearcoatRoughness: 0.26,
+        sheen: 0.28,
+        sheenColor: new THREE.Color('#74C35C'),
+        sheenRoughness: 0.45,
+        side: THREE.DoubleSide,
+      }),
+      { color: '#88E050', intensity: 0.55, power: 2.2, scale: 1.2 }
+    );
 
     const basilVeinMat = new THREE.MeshStandardMaterial({
       color: '#5CA646',
@@ -738,6 +775,7 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
             rotation={[0, -b.phi, 0]}
             scale={b.scale}
             castShadow
+            receiveShadow
           />
         );
       })}
@@ -757,12 +795,16 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
         material={assets.materials.sauceChunkMat}
         position={[0.62, PIZZA_BASE_Y + 0.088, 0.1 * (sliceIdx % 2 === 0 ? 1 : -1)]}
         scale={[0.065, 0.014, 0.048]}
+        castShadow
+        receiveShadow
       />
       <mesh
         geometry={assets.geometries.blisterGeo}
         material={assets.materials.sauceChunkMat}
         position={[0.98, PIZZA_BASE_Y + 0.088, -0.14 * (sliceIdx % 2 === 0 ? 1 : -1)]}
         scale={[0.052, 0.012, 0.044]}
+        castShadow
+        receiveShadow
       />
     </group>
   );
@@ -786,6 +828,8 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
               material={assets.materials.cheeseBubbleMat}
               position={[0.04, 0.032, -0.02]}
               scale={[1.25, 0.48, 0.98]}
+              castShadow
+              receiveShadow
             />
           )}
         </group>
@@ -814,11 +858,14 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
             geometry={assets.geometries.pepCharRimGeo}
             material={assets.materials.pepCharMat}
             position={[0, 0.042, 0]}
+            castShadow
+            receiveShadow
           />
           <mesh
             geometry={assets.geometries.pepGreaseGeo}
             material={assets.materials.pepGreaseMat}
             position={[0, 0.017, 0]}
+            receiveShadow
           />
         </group>
       );
@@ -847,6 +894,7 @@ export function PizzaModel({ exploded, highlightedPart, onSelectPart }: FoodMode
             material={assets.materials.basilVeinMat}
             position={[-0.04, 0.025, 0]}
             rotation={[0, 0, Math.PI / 2 - 0.05]}
+            castShadow
           />
         </group>
       );

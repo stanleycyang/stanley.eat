@@ -1,22 +1,18 @@
 'use client';
 
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { FoodModelProps } from '@/types/dish';
 import {
-  getOrganicNoiseBump,
+  applyFoodSSS,
+  displaceGeometryOrganic,
+  getOrganicNormalMap,
   getPankoCrustTextures,
   getRiceGrainTextures,
   getStonewareTextures,
 } from '@/lib/proceduralTextures';
 import { FoodLayer } from './FoodLayer';
-
-interface RiceCluster {
-  pos: [number, number, number];
-  scale: [number, number, number];
-  rot: [number, number, number];
-}
 
 interface SesameSeed {
   pos: [number, number, number];
@@ -35,47 +31,30 @@ interface KatsuSlice {
   scale: [number, number, number];
 }
 
-const RICE_CLUSTERS: RiceCluster[] = [
-  { pos: [-0.62, 0.25, 0.0], scale: [0.34, 0.16, 0.38], rot: [0.05, 0.2, -0.08] },
-  { pos: [-0.88, 0.14, -0.22], scale: [0.28, 0.16, 0.28], rot: [0.1, -0.3, 0.15] },
-  { pos: [-0.92, 0.12, 0.24], scale: [0.26, 0.15, 0.28], rot: [-0.1, 0.4, 0.12] },
-  { pos: [-0.48, 0.18, -0.34], scale: [0.26, 0.14, 0.25], rot: [0.15, 0.5, -0.1] },
-  { pos: [-0.44, 0.16, 0.36], scale: [0.25, 0.14, 0.24], rot: [-0.12, -0.4, -0.08] },
-  { pos: [-0.72, 0.12, -0.48], scale: [0.22, 0.13, 0.22], rot: [0.2, 0.1, 0.05] },
-  { pos: [-0.68, 0.1, 0.5], scale: [0.22, 0.13, 0.22], rot: [-0.18, -0.2, 0.06] },
-  { pos: [-1.08, 0.02, -0.02], scale: [0.22, 0.13, 0.32], rot: [0.0, 0.05, 0.22] },
-  { pos: [-0.34, 0.14, 0.02], scale: [0.24, 0.14, 0.3], rot: [0.04, -0.15, -0.2] },
-  // Fine bumpy surface rice-grain tufts for organic fluffy silhouette
-  { pos: [-0.76, 0.27, -0.12], scale: [0.15, 0.09, 0.16], rot: [0.2, 0.6, 0.1] },
-  { pos: [-0.56, 0.28, 0.14], scale: [0.16, 0.09, 0.15], rot: [-0.15, 0.3, -0.1] },
-  { pos: [-0.66, 0.3, 0.02], scale: [0.14, 0.08, 0.14], rot: [0.1, -0.5, 0.08] },
-  { pos: [-0.84, 0.21, 0.12], scale: [0.13, 0.08, 0.14], rot: [-0.2, 0.8, 0.2] },
-  { pos: [-0.52, 0.22, -0.2], scale: [0.14, 0.08, 0.13], rot: [0.25, -0.3, -0.15] },
-  { pos: [-0.95, 0.11, -0.36], scale: [0.14, 0.09, 0.14], rot: [0.12, 0.4, 0.25] },
-  { pos: [-0.96, 0.1, 0.36], scale: [0.14, 0.08, 0.14], rot: [-0.14, -0.5, 0.24] },
-  { pos: [-0.4, 0.14, -0.45], scale: [0.13, 0.08, 0.13], rot: [0.18, 0.2, -0.12] },
-  { pos: [-0.38, 0.12, 0.46], scale: [0.13, 0.08, 0.13], rot: [-0.18, -0.3, -0.14] },
-  { pos: [-0.64, 0.18, -0.38], scale: [0.13, 0.08, 0.12], rot: [0.22, 0.7, 0.05] },
-  { pos: [-0.6, 0.18, 0.38], scale: [0.13, 0.08, 0.12], rot: [-0.2, -0.7, 0.04] },
-  { pos: [-0.82, 0.22, -0.28], scale: [0.12, 0.07, 0.12], rot: [0.15, 0.25, 0.18] },
-  { pos: [-0.75, 0.24, 0.24], scale: [0.12, 0.07, 0.12], rot: [-0.16, 0.55, 0.14] },
-];
+const NORMAL_SCALE_PLATE = new THREE.Vector2(0.62, 0.62);
+const NORMAL_SCALE_RIM = new THREE.Vector2(0.55, 0.55);
+const NORMAL_SCALE_SAUCE = new THREE.Vector2(0.32, 0.32);
+const NORMAL_SCALE_PANKO = new THREE.Vector2(1.05, 1.05);
+const NORMAL_SCALE_PORK = new THREE.Vector2(0.5, 0.5);
+const NORMAL_SCALE_PICKLE = new THREE.Vector2(0.45, 0.45);
+
+const RICE_GRAIN_COUNT = 420;
 
 const SESAME_SEEDS: SesameSeed[] = [
-  { pos: [-0.66, 0.365, 0.01], rot: [0.1, 0.4, 0.05] },
-  { pos: [-0.61, 0.355, 0.08], rot: [-0.12, 1.2, 0.1] },
-  { pos: [-0.71, 0.35, -0.06], rot: [0.18, 2.1, -0.08] },
-  { pos: [-0.57, 0.34, -0.05], rot: [0.08, 0.8, -0.14] },
-  { pos: [-0.74, 0.335, 0.09], rot: [-0.15, 1.7, 0.12] },
-  { pos: [-0.63, 0.35, -0.12], rot: [0.22, 2.6, 0.05] },
-  { pos: [-0.54, 0.325, 0.14], rot: [-0.18, 0.3, -0.16] },
-  { pos: [-0.79, 0.32, -0.02], rot: [0.05, 1.4, 0.22] },
-  { pos: [-0.69, 0.345, 0.14], rot: [-0.2, 2.4, 0.08] },
-  { pos: [-0.6, 0.36, -0.01], rot: [0.04, 1.9, -0.05] },
-  { pos: [-0.75, 0.325, -0.14], rot: [0.24, 0.6, 0.15] },
-  { pos: [-0.52, 0.315, 0.04], rot: [-0.08, 2.8, -0.2] },
-  { pos: [-0.67, 0.33, 0.21], rot: [-0.25, 1.1, 0.06] },
-  { pos: [-0.82, 0.295, 0.08], rot: [-0.14, 0.5, 0.26] },
+  { pos: [-0.66, 0.382, 0.01], rot: [0.1, 0.4, 0.05] },
+  { pos: [-0.61, 0.372, 0.08], rot: [-0.12, 1.2, 0.1] },
+  { pos: [-0.71, 0.368, -0.06], rot: [0.18, 2.1, -0.08] },
+  { pos: [-0.57, 0.358, -0.05], rot: [0.08, 0.8, -0.14] },
+  { pos: [-0.74, 0.352, 0.09], rot: [-0.15, 1.7, 0.12] },
+  { pos: [-0.63, 0.366, -0.12], rot: [0.22, 2.6, 0.05] },
+  { pos: [-0.54, 0.342, 0.14], rot: [-0.18, 0.3, -0.16] },
+  { pos: [-0.79, 0.336, -0.02], rot: [0.05, 1.4, 0.22] },
+  { pos: [-0.69, 0.362, 0.14], rot: [-0.2, 2.4, 0.08] },
+  { pos: [-0.6, 0.376, -0.01], rot: [0.04, 1.9, -0.05] },
+  { pos: [-0.75, 0.342, -0.14], rot: [0.24, 0.6, 0.15] },
+  { pos: [-0.52, 0.332, 0.04], rot: [-0.08, 2.8, -0.2] },
+  { pos: [-0.67, 0.348, 0.21], rot: [-0.25, 1.1, 0.06] },
+  { pos: [-0.82, 0.312, 0.08], rot: [-0.14, 0.5, 0.26] },
 ];
 
 const CARROT_CHUNKS: VegPiece[] = [
@@ -132,45 +111,153 @@ const KATSU_CRUMBS: [number, number, number][] = [
   [-0.26, 0.1, 0.02],
 ];
 
+function createSeededRand(seed: number): () => number {
+  let a = seed | 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 export function CurryModel({
   exploded,
   highlightedPart,
   onSelectPart,
 }: FoodModelProps) {
   const sauceRef = useRef<THREE.MeshPhysicalMaterial>(null);
+  const riceInstRef = useRef<THREE.InstancedMesh>(null);
 
   const handleSelect = (partId: string) => {
     onSelectPart(highlightedPart === partId ? null : partId);
   };
 
-  // Shared cached procedural PBR textures (do NOT dispose cached singletons)
+  // Shared cached 512x512 Sobel RGB procedural PBR textures (NEVER dispose cached singletons)
   const stonewareTex = useMemo(() => getStonewareTextures(), []);
   const riceTex = useMemo(() => getRiceGrainTextures(), []);
   const pankoTex = useMemo(() => getPankoCrustTextures(), []);
-  const sauceBump = useMemo(() => getOrganicNoiseBump(73, 10), []);
-  const vegBump = useMemo(() => getOrganicNoiseBump(109, 12), []);
-  const porkBump = useMemo(() => getOrganicNoiseBump(211, 14), []);
+  const sauceNormal = useMemo(() => getOrganicNormalMap(73, 10, 1.3), []);
+  const vegNormal = useMemo(() => getOrganicNormalMap(109, 12, 1.5), []);
+  const porkNormal = useMemo(() => getOrganicNormalMap(211, 14, 1.4), []);
 
-  // Sculpted oval ceramic plate LatheGeometry (scaled along X for an organic oval)
+  // Per-instance Food SSS materials (disposed cleanly on unmount)
+  const riceMat = useMemo(
+    () =>
+      applyFoodSSS(
+        new THREE.MeshPhysicalMaterial({
+          color: '#FCF7EC',
+          normalMap: riceTex.normalMap,
+          normalScale: new THREE.Vector2(0.75, 0.75),
+          roughnessMap: riceTex.roughnessMap,
+          roughness: 0.78,
+          metalness: 0,
+          clearcoat: 0.42,
+          clearcoatRoughness: 0.24,
+          sheen: 0.32,
+          sheenRoughness: 0.5,
+          sheenColor: new THREE.Color('#FFFDF5'),
+          emissive: new THREE.Color('#5C4428'),
+          emissiveIntensity: 0,
+        }),
+        { color: '#FFF4DC', intensity: 0.35, power: 2.6, scale: 1.1 }
+      ),
+    [riceTex]
+  );
+
+  const riceGrainMat = useMemo(
+    () =>
+      applyFoodSSS(
+        new THREE.MeshPhysicalMaterial({
+          color: '#FFFDF7',
+          roughness: 0.26,
+          metalness: 0,
+          clearcoat: 0.55,
+          clearcoatRoughness: 0.18,
+          emissive: new THREE.Color('#5C4428'),
+          emissiveIntensity: 0,
+        }),
+        { color: '#FFF4DC', intensity: 0.36, power: 2.5, scale: 1.15 }
+      ),
+    []
+  );
+
+  const carrotMat = useMemo(
+    () =>
+      applyFoodSSS(
+        new THREE.MeshPhysicalMaterial({
+          color: '#E55E16',
+          normalMap: vegNormal,
+          normalScale: new THREE.Vector2(0.55, 0.55),
+          roughness: 0.24,
+          clearcoat: 0.68,
+          clearcoatRoughness: 0.14,
+          emissive: new THREE.Color('#7D2900'),
+          emissiveIntensity: 0,
+        }),
+        { color: '#FF8A33', intensity: 0.48, power: 2.4, scale: 1.15 }
+      ),
+    [vegNormal]
+  );
+
+  const potatoMat = useMemo(
+    () =>
+      applyFoodSSS(
+        new THREE.MeshPhysicalMaterial({
+          color: '#ECCC80',
+          normalMap: vegNormal,
+          normalScale: new THREE.Vector2(0.6, 0.6),
+          roughness: 0.36,
+          clearcoat: 0.38,
+          clearcoatRoughness: 0.22,
+          emissive: new THREE.Color('#6A4A10'),
+          emissiveIntensity: 0,
+        }),
+        { color: '#FFE6A8', intensity: 0.42, power: 2.5, scale: 1.1 }
+      ),
+    [vegNormal]
+  );
+
+  // Sculpted oval ceramic plate LatheGeometry
   const plateGeo = useMemo(() => {
     const pts = [
       new THREE.Vector2(0.0, -0.45),
       new THREE.Vector2(0.58, -0.45),
-      new THREE.Vector2(0.66, -0.49), // underside ceramic foot
+      new THREE.Vector2(0.66, -0.49),
       new THREE.Vector2(0.75, -0.49),
       new THREE.Vector2(0.84, -0.42),
       new THREE.Vector2(1.06, -0.31),
       new THREE.Vector2(1.22, -0.15),
-      new THREE.Vector2(1.26, -0.05), // soft raised outer rim
+      new THREE.Vector2(1.26, -0.05),
       new THREE.Vector2(1.23, -0.02),
       new THREE.Vector2(1.18, -0.05),
       new THREE.Vector2(1.06, -0.19),
       new THREE.Vector2(0.84, -0.32),
-      new THREE.Vector2(0.0, -0.34), // smooth inner well
+      new THREE.Vector2(0.0, -0.34),
     ];
     const geo = new THREE.LatheGeometry(pts, 64);
     geo.computeVertexNormals();
     return geo;
+  }, []);
+
+  // Organically sculpted rice dome mound + individual rice grain geometry
+  const { riceMoundGeo, riceGrainGeo } = useMemo(() => {
+    const mound = new THREE.SphereGeometry(0.92, 42, 30);
+    mound.scale(0.74, 0.42, 0.86);
+    mound.translate(-0.68, -0.04, 0.0);
+    displaceGeometryOrganic(mound, {
+      amplitude: 0.042,
+      frequency: 3.6,
+      seed: 19,
+      flattenBottomY: -0.33,
+      preserveSeam: true,
+    });
+
+    const grain = new THREE.SphereGeometry(1, 8, 6);
+    grain.scale(0.041, 0.022, 0.024);
+    grain.computeVertexNormals();
+
+    return { riceMoundGeo: mound, riceGrainGeo: grain };
   }, []);
 
   // Organic golden curry roux pool filling the right half & curving around the rice mound
@@ -214,42 +301,52 @@ export function CurryModel({
     return geo;
   }, []);
 
-  // Half-moon simmered carrot chunk geometry
-  const carrotGeo = useMemo(() => {
+  // Organically displaced simmered carrot half-moons & chunky potatoes
+  const { carrotGeo, potatoGeo, pickleGeo } = useMemo(() => {
     const s = new THREE.Shape();
     s.absarc(0, 0, 0.145, 0, Math.PI, false);
     s.quadraticCurveTo(0, -0.025, 0.145, 0);
-    const geo = new THREE.ExtrudeGeometry(s, {
+    const carrot = new THREE.ExtrudeGeometry(s, {
       depth: 0.075,
       bevelEnabled: true,
       bevelThickness: 0.024,
       bevelSize: 0.02,
       bevelSegments: 4,
     });
-    geo.center();
-    geo.computeVertexNormals();
-    return geo;
-  }, []);
+    carrot.center();
+    displaceGeometryOrganic(carrot, {
+      amplitude: 0.013,
+      frequency: 9.5,
+      seed: 103,
+      preserveSeam: true,
+    });
 
-  // Fukujinzuke curled pickle slice
-  const pickleGeo = useMemo(() => {
-    const s = new THREE.Shape();
-    s.absarc(0, 0, 0.085, 0.2, Math.PI * 1.18, false);
-    s.quadraticCurveTo(-0.02, 0.01, 0.085 * Math.cos(0.2), 0.085 * Math.sin(0.2));
-    const geo = new THREE.ExtrudeGeometry(s, {
+    const potato = new THREE.DodecahedronGeometry(1, 3);
+    displaceGeometryOrganic(potato, {
+      amplitude: 0.14,
+      frequency: 2.1,
+      seed: 211,
+      preserveSeam: true,
+    });
+
+    const ps = new THREE.Shape();
+    ps.absarc(0, 0, 0.085, 0.2, Math.PI * 1.18, false);
+    ps.quadraticCurveTo(-0.02, 0.01, 0.085 * Math.cos(0.2), 0.085 * Math.sin(0.2));
+    const pickle = new THREE.ExtrudeGeometry(ps, {
       depth: 0.016,
       bevelEnabled: true,
       bevelThickness: 0.006,
       bevelSize: 0.005,
       bevelSegments: 2,
     });
-    geo.center();
-    geo.computeVertexNormals();
-    return geo;
+    pickle.center();
+    pickle.computeVertexNormals();
+
+    return { carrotGeo: carrot, potatoGeo: potato, pickleGeo: pickle };
   }, []);
 
-  // Crispy tonkatsu outer panko shell (pillowy rounded cross-section)
-  const katsuCrustGeo = useMemo(() => {
+  // Craggy irregular panko-crusted tonkatsu shell + moist pork cross-section
+  const { katsuCrustGeo, katsuPorkGeo, drizzleGeo } = useMemo(() => {
     const s = new THREE.Shape();
     const w = 0.34;
     const h = 0.115;
@@ -259,40 +356,38 @@ export function CurryModel({
     s.quadraticCurveTo(w * 0.85, -h, 0, -h * 0.95);
     s.quadraticCurveTo(-w * 0.85, -h, -w, -h * 0.25);
 
-    const geo = new THREE.ExtrudeGeometry(s, {
+    const crust = new THREE.ExtrudeGeometry(s, {
       depth: 0.14,
       bevelEnabled: true,
       bevelThickness: 0.024,
       bevelSize: 0.022,
       bevelSegments: 4,
+      curveSegments: 18,
     });
-    geo.center();
-    geo.computeVertexNormals();
-    return geo;
-  }, []);
+    crust.center();
+    displaceGeometryOrganic(crust, {
+      amplitude: 0.016,
+      frequency: 14.5,
+      seed: 307,
+      preserveSeam: true,
+    });
 
-  // Tender pork cross-section visible on both cut faces of each tonkatsu strip
-  const katsuPorkGeo = useMemo(() => {
-    const s = new THREE.Shape();
-    const w = 0.295;
-    const h = 0.088;
-    s.moveTo(-w, -h * 0.2);
-    s.quadraticCurveTo(-w, h, 0, h * 1.08);
-    s.quadraticCurveTo(w, h, w, -h * 0.2);
-    s.quadraticCurveTo(w * 0.85, -h, 0, -h * 0.92);
-    s.quadraticCurveTo(-w * 0.85, -h, -w, -h * 0.2);
+    const ps = new THREE.Shape();
+    const pw = 0.295;
+    const ph = 0.088;
+    ps.moveTo(-pw, -ph * 0.2);
+    ps.quadraticCurveTo(-pw, ph, 0, ph * 1.08);
+    ps.quadraticCurveTo(pw, ph, pw, -ph * 0.2);
+    ps.quadraticCurveTo(pw * 0.85, -ph, 0, -ph * 0.92);
+    ps.quadraticCurveTo(-pw * 0.85, -ph, -pw, -ph * 0.2);
 
-    const geo = new THREE.ExtrudeGeometry(s, {
+    const pork = new THREE.ExtrudeGeometry(ps, {
       depth: 0.194,
       bevelEnabled: false,
     });
-    geo.center();
-    geo.computeVertexNormals();
-    return geo;
-  }, []);
+    pork.center();
+    pork.computeVertexNormals();
 
-  // Subtle tonkatsu bulldog-sauce drizzle ribbon over the top slices
-  const drizzleGeo = useMemo(() => {
     const curve = new THREE.CatmullRomCurve3([
       new THREE.Vector3(-0.22, 0.33, -0.26),
       new THREE.Vector3(0.06, 0.36, -0.18),
@@ -301,41 +396,134 @@ export function CurryModel({
       new THREE.Vector3(-0.06, 0.34, 0.22),
       new THREE.Vector3(0.24, 0.31, 0.31),
     ]);
-    return new THREE.TubeGeometry(curve, 44, 0.015, 8, false);
+    const drizzle = new THREE.TubeGeometry(curve, 44, 0.015, 8, false);
+
+    return { katsuCrustGeo: crust, katsuPorkGeo: pork, drizzleGeo: drizzle };
+  }, []);
+
+  // Populate 420 deterministic instanced rice grains hugging the sculpted dome (zero per-frame allocs)
+  useLayoutEffect(() => {
+    const inst = riceInstRef.current;
+    if (!inst) return;
+
+    const rand = createSeededRand(2026);
+    const dummy = new THREE.Object3D();
+    const normal = new THREE.Vector3();
+    const up = new THREE.Vector3(0, 1, 0);
+    const quat = new THREE.Quaternion();
+    const localRot = new THREE.Quaternion();
+    const euler = new THREE.Euler();
+    const grainColor = new THREE.Color();
+
+    const cx = -0.68;
+    const cy = -0.04;
+    const rx = 0.695;
+    const ry = 0.395;
+    const rz = 0.805;
+
+    for (let i = 0; i < RICE_GRAIN_COUNT; i++) {
+      // Fibonacci hemisphere sampling biased toward visible upper surface
+      const u = (i + 0.5) / RICE_GRAIN_COUNT;
+      const phi = Math.acos(1 - u * 0.88);
+      const theta = i * 2.39996323 + (rand() - 0.5) * 0.28;
+
+      const sinPhi = Math.sin(phi);
+      const cosPhi = Math.cos(phi);
+      const radialJitter = 0.96 + rand() * 0.075;
+
+      const dx = sinPhi * Math.cos(theta);
+      const dy = cosPhi;
+      const dz = sinPhi * Math.sin(theta);
+
+      const x = cx + dx * rx * radialJitter;
+      const y = Math.max(-0.27, cy + dy * ry * radialJitter);
+      const z = dz * rz * radialJitter;
+
+      dummy.position.set(x, y, z);
+
+      // Align grain tangentially to dome surface with natural organic tumble
+      normal.set(dx / rx, dy / ry, dz / rz).normalize();
+      quat.setFromUnitVectors(up, normal);
+      euler.set(
+        (rand() - 0.5) * 0.55,
+        rand() * Math.PI * 2,
+        (rand() - 0.5) * 0.55
+      );
+      localRot.setFromEuler(euler);
+      dummy.quaternion.copy(quat).multiply(localRot);
+
+      const s = 0.85 + rand() * 0.42;
+      dummy.scale.set(s * (0.95 + rand() * 0.2), s, s * (0.9 + rand() * 0.2));
+      dummy.updateMatrix();
+      inst.setMatrixAt(i, dummy.matrix);
+
+      // Subtle grain-to-grain warm ivory tonal variation
+      const shade = 0.95 + rand() * 0.06;
+      grainColor.setRGB(shade, shade * 0.985, shade * 0.945);
+      inst.setColorAt(i, grainColor);
+    }
+
+    inst.instanceMatrix.needsUpdate = true;
+    inst.computeBoundingSphere();
+    if (inst.instanceColor) inst.instanceColor.needsUpdate = true;
   }, []);
 
   useEffect(() => {
     return () => {
       plateGeo.dispose();
+      riceMoundGeo.dispose();
+      riceGrainGeo.dispose();
       curryPoolGeo.dispose();
       carrotGeo.dispose();
+      potatoGeo.dispose();
       pickleGeo.dispose();
       katsuCrustGeo.dispose();
       katsuPorkGeo.dispose();
       drizzleGeo.dispose();
+      riceMat.dispose();
+      riceGrainMat.dispose();
+      carrotMat.dispose();
+      potatoMat.dispose();
     };
   }, [
     plateGeo,
+    riceMoundGeo,
+    riceGrainGeo,
     curryPoolGeo,
     carrotGeo,
+    potatoGeo,
     pickleGeo,
     katsuCrustGeo,
     katsuPorkGeo,
     drizzleGeo,
+    riceMat,
+    riceGrainMat,
+    carrotMat,
+    potatoMat,
   ]);
-
-  useFrame((state) => {
-    if (sauceRef.current) {
-      const t = state.clock.elapsedTime;
-      sauceRef.current.clearcoatRoughness = 0.075 + Math.sin(t * 1.4) * 0.018;
-    }
-  });
 
   const isPlateHi = highlightedPart === 'plate';
   const isRiceHi = highlightedPart === 'rice';
   const isSauceHi = highlightedPart === 'sauce';
   const isVegHi = highlightedPart === 'veg';
   const isKatsuHi = highlightedPart === 'katsu';
+
+  useEffect(() => {
+    riceMat.emissiveIntensity = isRiceHi ? 0.2 : 0;
+    riceGrainMat.emissiveIntensity = isRiceHi ? 0.18 : 0;
+  }, [isRiceHi, riceMat, riceGrainMat]);
+
+  useEffect(() => {
+    carrotMat.emissiveIntensity = isVegHi ? 0.3 : 0;
+    potatoMat.emissiveIntensity = isVegHi ? 0.28 : 0;
+  }, [isVegHi, carrotMat, potatoMat]);
+
+  useFrame((state) => {
+    if (sauceRef.current) {
+      const t = state.clock.elapsedTime;
+      sauceRef.current.clearcoatRoughness = 0.065 + Math.sin(t * 1.4) * 0.016;
+    }
+  });
 
   return (
     <group>
@@ -353,24 +541,23 @@ export function CurryModel({
             <meshPhysicalMaterial
               color="#F8F1E6"
               map={stonewareTex.map}
-              bumpMap={stonewareTex.bumpMap}
-              bumpScale={0.016}
+              normalMap={stonewareTex.normalMap}
+              normalScale={NORMAL_SCALE_PLATE}
               roughnessMap={stonewareTex.roughnessMap}
               roughness={0.86}
               metalness={0.02}
-              clearcoat={0.26}
-              clearcoatRoughness={0.44}
+              clearcoat={0.28}
+              clearcoatRoughness={0.42}
               emissive="#4A2E1A"
               emissiveIntensity={isPlateHi ? 0.2 : 0}
             />
           </mesh>
-          {/* Subtle hand-glazed toasted stoneware rim accent */}
-          <mesh position={[0, -0.032, 0]} rotation={[Math.PI / 2, 0, 0]} receiveShadow>
+          <mesh position={[0, -0.032, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
             <torusGeometry args={[1.225, 0.022, 14, 72]} />
             <meshStandardMaterial
               color="#D4BEA4"
-              bumpMap={stonewareTex.bumpMap}
-              bumpScale={0.018}
+              normalMap={stonewareTex.normalMap}
+              normalScale={NORMAL_SCALE_RIM}
               roughnessMap={stonewareTex.roughnessMap}
               roughness={0.78}
               emissive="#5A331C"
@@ -380,7 +567,7 @@ export function CurryModel({
         </group>
       </FoodLayer>
 
-      {/* Layer 2: Pearlescent Textured Koshihikari Rice Mound */}
+      {/* Layer 2: Organic Rice Mound + 420 Instanced Individual Koshihikari Rice Grains */}
       <FoodLayer
         partId="rice"
         label="Koshihikari Rice"
@@ -391,59 +578,16 @@ export function CurryModel({
         onSelect={handleSelect}
       >
         <group>
-          {/* Main sculpted crescent-dome rice body with individual grain stipple bump + starch crown specular */}
-          <mesh
-            position={[-0.68, -0.04, 0.0]}
-            scale={[0.76, 0.42, 0.88]}
+          <mesh geometry={riceMoundGeo} material={riceMat} castShadow receiveShadow />
+
+          <instancedMesh
+            ref={riceInstRef}
+            args={[riceGrainGeo, riceGrainMat, RICE_GRAIN_COUNT]}
             castShadow
             receiveShadow
-          >
-            <sphereGeometry args={[0.92, 36, 28]} />
-            <meshPhysicalMaterial
-              color="#FCF8F0"
-              bumpMap={riceTex.bumpMap}
-              bumpScale={0.048}
-              roughnessMap={riceTex.roughnessMap}
-              roughness={0.88}
-              metalness={0.0}
-              clearcoat={0.34}
-              clearcoatRoughness={0.3}
-              sheen={0.38}
-              sheenRoughness={0.55}
-              sheenColor="#FFFDF5"
-              emissive="#5C4428"
-              emissiveIntensity={isRiceHi ? 0.2 : 0}
-            />
-          </mesh>
+          />
 
-          {/* Overlapping soft rice tufts with matching pearlescent grain PBR */}
-          {RICE_CLUSTERS.map((c, idx) => (
-            <mesh
-              key={idx}
-              position={c.pos}
-              rotation={c.rot}
-              scale={c.scale}
-              castShadow
-              receiveShadow
-            >
-              <icosahedronGeometry args={[1, 2]} />
-              <meshPhysicalMaterial
-                color={idx % 3 === 0 ? '#FFFDF8' : '#F9F3E8'}
-                bumpMap={riceTex.bumpMap}
-                bumpScale={0.042}
-                roughnessMap={riceTex.roughnessMap}
-                roughness={0.86}
-                clearcoat={0.32}
-                clearcoatRoughness={0.32}
-                sheen={0.35}
-                sheenColor="#FFFDF5"
-                emissive="#5C4428"
-                emissiveIntensity={isRiceHi ? 0.2 : 0}
-              />
-            </mesh>
-          ))}
-
-          {/* Pinch of glossy black sesame seeds on top */}
+          {/* Pinch of glossy black sesame seeds crowning the rice */}
           {SESAME_SEEDS.map((seed, idx) => (
             <mesh
               key={`sesame-${idx}`}
@@ -455,8 +599,8 @@ export function CurryModel({
               <sphereGeometry args={[1, 8, 8]} />
               <meshPhysicalMaterial
                 color="#1E1B18"
-                roughness={0.28}
-                clearcoat={0.5}
+                roughness={0.26}
+                clearcoat={0.55}
                 metalness={0.04}
               />
             </mesh>
@@ -483,49 +627,49 @@ export function CurryModel({
           >
             <meshPhysicalMaterial
               ref={sauceRef}
-              color="#632D0C"
-              bumpMap={sauceBump}
-              bumpScale={0.012}
-              roughness={0.14}
+              color="#5F2A0A"
+              normalMap={sauceNormal}
+              normalScale={NORMAL_SCALE_SAUCE}
+              roughness={0.12}
               metalness={0.02}
               clearcoat={1}
-              clearcoatRoughness={0.08}
+              clearcoatRoughness={0.065}
               ior={1.42}
               emissive="#7A2B08"
-              emissiveIntensity={isSauceHi ? 0.35 : 0.04}
+              emissiveIntensity={isSauceHi ? 0.34 : 0.03}
             />
           </mesh>
-          {/* Subtle richer amber roux swell & depth variation */}
+          {/* Subtle richer amber roux swells catching studio softboxes */}
           <mesh position={[0.74, -0.026, 0.06]} scale={[0.54, 0.042, 0.46]} receiveShadow>
             <sphereGeometry args={[1, 28, 16]} />
             <meshPhysicalMaterial
-              color="#763A12"
-              bumpMap={sauceBump}
-              bumpScale={0.01}
-              roughness={0.12}
+              color="#743810"
+              normalMap={sauceNormal}
+              normalScale={NORMAL_SCALE_SAUCE}
+              roughness={0.1}
               clearcoat={1}
-              clearcoatRoughness={0.06}
+              clearcoatRoughness={0.055}
               emissive="#7A2B08"
-              emissiveIntensity={isSauceHi ? 0.35 : 0.04}
+              emissiveIntensity={isSauceHi ? 0.34 : 0.03}
             />
           </mesh>
           <mesh position={[0.38, -0.028, -0.32]} scale={[0.36, 0.032, 0.32]} receiveShadow>
             <sphereGeometry args={[1, 20, 14]} />
             <meshPhysicalMaterial
-              color="#552408"
-              bumpMap={sauceBump}
-              bumpScale={0.009}
-              roughness={0.13}
+              color="#522107"
+              normalMap={sauceNormal}
+              normalScale={NORMAL_SCALE_SAUCE}
+              roughness={0.11}
               clearcoat={1}
-              clearcoatRoughness={0.07}
+              clearcoatRoughness={0.06}
               emissive="#7A2B08"
-              emissiveIntensity={isSauceHi ? 0.35 : 0.04}
+              emissiveIntensity={isSauceHi ? 0.34 : 0.03}
             />
           </mesh>
         </group>
       </FoodLayer>
 
-      {/* Layer 4: Simmered Carrots, Potatoes, Peas & Fukujinzuke Pickles */}
+      {/* Layer 4: Organic Sculpted SSS Carrots, Potatoes, Peas & Fukujinzuke Pickles */}
       <FoodLayer
         partId="veg"
         label="Carrots & Potatoes"
@@ -536,69 +680,45 @@ export function CurryModel({
         onSelect={handleSelect}
       >
         <group>
-          {/* Chunky simmered carrot half-moons with subtle organic bump */}
           {CARROT_CHUNKS.map((carrot, idx) => (
             <mesh
               key={`carrot-${idx}`}
               geometry={carrotGeo}
+              material={carrotMat}
               position={carrot.pos}
               rotation={carrot.rot}
               scale={carrot.scale}
               castShadow
               receiveShadow
-            >
-              <meshPhysicalMaterial
-                color="#E56119"
-                bumpMap={vegBump}
-                bumpScale={0.016}
-                roughness={0.24}
-                clearcoat={0.62}
-                clearcoatRoughness={0.16}
-                emissive="#7D2900"
-                emissiveIntensity={isVegHi ? 0.32 : 0}
-              />
-            </mesh>
+            />
           ))}
 
-          {/* Golden-cream potato chunks glistening with curry glaze */}
           {POTATO_CHUNKS.map((potato, idx) => (
             <mesh
               key={`potato-${idx}`}
+              geometry={potatoGeo}
+              material={potatoMat}
               position={potato.pos}
               rotation={potato.rot}
               scale={potato.scale}
               castShadow
               receiveShadow
-            >
-              <dodecahedronGeometry args={[1, 2]} />
-              <meshPhysicalMaterial
-                color="#ECCE84"
-                bumpMap={vegBump}
-                bumpScale={0.02}
-                roughness={0.38}
-                clearcoat={0.36}
-                clearcoatRoughness={0.22}
-                emissive="#6A4A10"
-                emissiveIntensity={isVegHi ? 0.3 : 0}
-              />
-            </mesh>
+            />
           ))}
 
-          {/* Bright sweet green peas */}
           {PEAS_POSITIONS.map((pos, idx) => (
-            <mesh key={`pea-${idx}`} position={pos} castShadow>
+            <mesh key={`pea-${idx}`} position={pos} castShadow receiveShadow>
               <sphereGeometry args={[0.044, 14, 14]} />
               <meshPhysicalMaterial
                 color="#5AA432"
-                roughness={0.22}
-                clearcoat={0.65}
+                roughness={0.2}
+                clearcoat={0.72}
                 emissive="#245210"
-                emissiveIntensity={isVegHi ? 0.36 : 0}
+                emissiveIntensity={isVegHi ? 0.34 : 0}
               />
             </mesh>
           ))}
 
-          {/* Red fukujinzuke pickles tucked neatly on the rim */}
           {FUKUJINZUKE_PIECES.map((pickle, idx) => (
             <mesh
               key={`pickle-${idx}`}
@@ -607,23 +727,24 @@ export function CurryModel({
               rotation={pickle.rot}
               scale={pickle.scale}
               castShadow
+              receiveShadow
             >
               <meshPhysicalMaterial
                 color={idx % 2 === 0 ? '#BD241E' : '#D4362B'}
-                bumpMap={vegBump}
-                bumpScale={0.014}
-                roughness={0.18}
-                clearcoat={0.85}
-                clearcoatRoughness={0.12}
+                normalMap={vegNormal}
+                normalScale={NORMAL_SCALE_PICKLE}
+                roughness={0.16}
+                clearcoat={0.88}
+                clearcoatRoughness={0.1}
                 emissive="#6A100A"
-                emissiveIntensity={isVegHi ? 0.36 : 0}
+                emissiveIntensity={isVegHi ? 0.34 : 0}
               />
             </mesh>
           ))}
         </group>
       </FoodLayer>
 
-      {/* Layer 5: Diagonally Sliced Crispy Panko Pork Tonkatsu */}
+      {/* Layer 5: Craggy Crispy Panko-Crusted Pork Tonkatsu */}
       <FoodLayer
         partId="katsu"
         label="Crispy Pork Tonkatsu"
@@ -641,48 +762,44 @@ export function CurryModel({
               rotation={slice.rot}
               scale={slice.scale}
             >
-              {/* Crispy porous golden-fried panko breading with high roughness contrast */}
               <mesh geometry={katsuCrustGeo} castShadow receiveShadow>
                 <meshStandardMaterial
                   color="#E8B97A"
                   map={pankoTex.map}
-                  bumpMap={pankoTex.bumpMap}
-                  bumpScale={0.058}
+                  normalMap={pankoTex.normalMap}
+                  normalScale={NORMAL_SCALE_PANKO}
                   roughnessMap={pankoTex.roughnessMap}
-                  roughness={0.95}
+                  roughness={0.96}
                   metalness={0.02}
                   emissive="#6B3408"
                   emissiveIntensity={isKatsuHi ? 0.28 : 0}
                 />
               </mesh>
 
-              {/* Moist tender ivory pork cross-section on cut faces */}
-              <mesh geometry={katsuPorkGeo} receiveShadow>
+              <mesh geometry={katsuPorkGeo} castShadow receiveShadow>
                 <meshPhysicalMaterial
                   color="#F3E1CE"
-                  bumpMap={porkBump}
-                  bumpScale={0.015}
-                  roughness={0.36}
-                  clearcoat={0.28}
-                  clearcoatRoughness={0.28}
+                  normalMap={porkNormal}
+                  normalScale={NORMAL_SCALE_PORK}
+                  roughness={0.34}
+                  clearcoat={0.32}
+                  clearcoatRoughness={0.26}
                   emissive="#634028"
                   emissiveIntensity={isKatsuHi ? 0.22 : 0}
                 />
               </mesh>
 
-              {/* Subtle pearly fat cap accent along upper meat edge */}
               <mesh position={[0, 0.068, 0]} scale={[0.24, 0.018, 0.197]}>
                 <boxGeometry args={[1, 1, 1]} />
                 <meshPhysicalMaterial
                   color="#FBF3E8"
-                  roughness={0.28}
-                  clearcoat={0.4}
+                  roughness={0.26}
+                  clearcoat={0.44}
                   emissive="#5C4428"
                   emissiveIntensity={isKatsuHi ? 0.2 : 0}
                 />
               </mesh>
 
-              {/* Sculpted crispy panko crumbs crowning each slice */}
               {KATSU_CRUMBS.map((crumb, cIdx) => (
                 <mesh
                   key={`crumb-${idx}-${cIdx}`}
@@ -692,28 +809,28 @@ export function CurryModel({
                     crumb[2],
                   ]}
                   scale={[0.032, 0.02, 0.026]}
+                  castShadow
                 >
                   <dodecahedronGeometry args={[1, 0]} />
                   <meshStandardMaterial
                     color={cIdx % 2 === 0 ? '#DF953A' : '#B5631B'}
-                    bumpMap={pankoTex.bumpMap}
-                    bumpScale={0.04}
-                    roughness={0.9}
+                    normalMap={pankoTex.normalMap}
+                    normalScale={NORMAL_SCALE_PANKO}
+                    roughness={0.92}
                     emissive="#6B3408"
-                    emissiveIntensity={isKatsuHi ? 0.28 : 0}
+                    emissiveIntensity={isKatsuHi ? 0.26 : 0}
                   />
                 </mesh>
               ))}
             </group>
           ))}
 
-          {/* Mirror-glossy dark tonkatsu sauce drizzle contrasting against crispy panko */}
-          <mesh geometry={drizzleGeo} castShadow>
+          <mesh geometry={drizzleGeo} castShadow receiveShadow>
             <meshPhysicalMaterial
-              color="#341206"
-              roughness={0.08}
+              color="#301005"
+              roughness={0.06}
               clearcoat={1}
-              clearcoatRoughness={0.05}
+              clearcoatRoughness={0.04}
               emissive="#541806"
               emissiveIntensity={isKatsuHi ? 0.34 : 0}
             />

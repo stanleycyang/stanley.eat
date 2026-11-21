@@ -5,8 +5,11 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { FoodModelProps } from '@/types/dish';
 import {
+  applyFoodSSS,
+  applyWetnessVertexColors,
+  displaceGeometryOrganic,
   getBambooWeaveTextures,
-  getOrganicNoiseBump,
+  getOrganicNormalMap,
   getStonewareTextures,
 } from '@/lib/proceduralTextures';
 import { FoodLayer } from './FoodLayer';
@@ -70,7 +73,7 @@ function createSteamerWallGeometry(
   return new THREE.LatheGeometry(pts, 48);
 }
 
-/** Creates a perforated round steamer parchment liner with real punched steam holes. */
+/** Creates a gently crinkled perforated round steamer parchment liner with real punched steam holes. */
 function createPerforatedParchmentGeometry(radius: number): THREE.BufferGeometry {
   const shape = new THREE.Shape();
   const segs = 48;
@@ -106,32 +109,40 @@ function createPerforatedParchmentGeometry(radius: number): THREE.BufferGeometry
     curveSegments: 16,
   });
   geo.rotateX(-Math.PI / 2);
-  return geo;
+
+  return displaceGeometryOrganic(geo, {
+    amplitude: 0.0045,
+    frequency: 4.5,
+    seed: 701,
+    flattenBottomY: -0.001,
+    preserveSeam: true,
+  });
 }
 
 /**
  * Creates a plump 18-pleat Xiaolongbao soup dumpling BufferGeometry
  * with spiral-converging pleat ridges, pinched twisted topknot,
- * and subtle warm soup-tinted lower belly vertex shading.
+ * organic soup-heavy belly sag (`displaceGeometryOrganic`), and
+ * warm translucent soup-to-porcelain vertical vertex color gradient (`applyWetnessVertexColors`).
  */
-function createXiaolongbaoGeometry(): THREE.BufferGeometry {
+function createXiaolongbaoGeometry(seed: number): THREE.BufferGeometry {
   const radialSegs = 72;
   const heightSegs = 34;
   const pleats = 18;
 
   const profile: [number, number, number][] = [
     [0.0, 0.001, 0.0],
-    [0.08, 0.16, 0.002],
-    [0.16, 0.255, 0.022],
-    [0.26, 0.312, 0.072],
-    [0.36, 0.322, 0.125],
-    [0.48, 0.296, 0.178],
-    [0.62, 0.232, 0.232],
-    [0.74, 0.152, 0.278],
-    [0.83, 0.082, 0.31],
-    [0.9, 0.09, 0.342],
-    [0.96, 0.056, 0.354],
-    [1.0, 0.001, 0.334],
+    [0.08, 0.165, 0.002],
+    [0.16, 0.262, 0.022],
+    [0.26, 0.318, 0.07],
+    [0.36, 0.326, 0.122],
+    [0.48, 0.296, 0.176],
+    [0.62, 0.232, 0.23],
+    [0.74, 0.152, 0.276],
+    [0.83, 0.082, 0.308],
+    [0.9, 0.09, 0.34],
+    [0.96, 0.056, 0.352],
+    [1.0, 0.001, 0.332],
   ];
 
   const sampleProfile = (v: number): [number, number] => {
@@ -149,14 +160,8 @@ function createXiaolongbaoGeometry(): THREE.BufferGeometry {
   };
 
   const positions: number[] = [];
-  const colors: number[] = [];
   const uvs: number[] = [];
   const indices: number[] = [];
-
-  const soupGlowColor = new THREE.Color('#EED0A0');
-  const doughIvoryColor = new THREE.Color('#FAF5E9');
-  const knotHighlightColor = new THREE.Color('#F5ECD8');
-  const tmpColor = new THREE.Color();
 
   for (let iy = 0; iy <= heightSegs; iy++) {
     const v = iy / heightSegs;
@@ -164,11 +169,8 @@ function createXiaolongbaoGeometry(): THREE.BufferGeometry {
 
     const pleatOnset = THREE.MathUtils.smoothstep(v, 0.26, 0.56);
     const pleatFade = 1 - THREE.MathUtils.smoothstep(v, 0.88, 0.99);
-    const pleatAmp = 0.0155 * pleatOnset * pleatFade;
-
+    const pleatAmp = 0.0158 * pleatOnset * pleatFade;
     const twist = Math.pow(Math.max(0, v - 0.24), 1.38) * 1.15;
-    const bellyWeight = Math.sin(THREE.MathUtils.clamp((v - 0.08) / 0.44, 0, 1) * Math.PI);
-    const knotWeight = THREE.MathUtils.smoothstep(v, 0.82, 0.96);
 
     for (let ix = 0; ix <= radialSegs; ix++) {
       const u = ix / radialSegs;
@@ -183,12 +185,6 @@ function createXiaolongbaoGeometry(): THREE.BufferGeometry {
 
       positions.push(Math.cos(theta) * r, y, Math.sin(theta) * r);
       uvs.push(u, v);
-
-      tmpColor.copy(doughIvoryColor);
-      tmpColor.lerp(soupGlowColor, bellyWeight * 0.45);
-      tmpColor.lerp(knotHighlightColor, knotWeight * 0.45);
-      const creaseShade = 1 - (1 - pleatWave) * 0.04 * pleatOnset * pleatFade;
-      colors.push(tmpColor.r * creaseShade, tmpColor.g * creaseShade, tmpColor.b * creaseShade);
     }
   }
 
@@ -206,10 +202,27 @@ function createXiaolongbaoGeometry(): THREE.BufferGeometry {
 
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(colors, 3));
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
   geo.setIndex(indices);
   geo.computeVertexNormals();
+
+  // Unique subtle heavy-soup organic belly sag per dumpling while keeping bottom flat & pleats intact
+  displaceGeometryOrganic(geo, {
+    amplitude: 0.0095,
+    frequency: 4.2,
+    seed,
+    flattenBottomY: 0,
+    preserveSeam: true,
+  });
+
+  // Rich translucent amber-ivory soup-heavy lower belly fading cleanly to porcelain-ivory topknot
+  applyWetnessVertexColors(geo, {
+    wetY: 0.03,
+    bandHeight: 0.21,
+    wetColor: '#E6CEAA',
+    dryColor: '#FAF4E8',
+  });
+
   return geo;
 }
 
@@ -293,12 +306,12 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
   });
 
   const assets = useMemo(() => {
-    // Shared cached procedural PBR textures (DO NOT dispose these!)
+    // Shared cached 512x512 procedural PBR & Sobel normal maps (DO NOT dispose these!)
     const bambooPbr = getBambooWeaveTextures();
     const stonewarePbr = getStonewareTextures();
-    const parchmentBump = getOrganicNoiseBump(109, 14);
-    const doughBump = getOrganicNoiseBump(127, 20);
-    const gingerBump = getOrganicNoiseBump(139, 16);
+    const parchmentNormal = getOrganicNormalMap(109, 14, 1.5);
+    const doughNormal = getOrganicNormalMap(127, 20, 1.3);
+    const gingerNormal = getOrganicNormalMap(139, 16, 1.8);
 
     // Local per-component rattan weave albedo (disposed on unmount)
     const rattanTex = createRattanTexture();
@@ -320,11 +333,8 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
     const parchmentGeo = createPerforatedParchmentGeometry(0.96);
     const lashingGeo = new THREE.BoxGeometry(0.032, 0.085, 0.022);
 
-    const dumplingGeo = createXiaolongbaoGeometry();
-    // Plump inner pork-broth core tucked inside the lower belly of each dumpling
-    const brothCoreGeo = new THREE.SphereGeometry(1, 20, 14);
-    brothCoreGeo.scale(0.24, 0.105, 0.24);
-    brothCoreGeo.translate(0, 0.105, 0);
+    // 5 individually sagged 18-pleat Xiaolongbao dumpling geometries
+    const dumplingGeos = DUMPLING_RING.map((_, i) => createXiaolongbaoGeometry(613 + i * 29));
 
     const saucerGeo = createDippingSaucerGeometry();
     const cobaltOuterRimGeo = new THREE.TorusGeometry(0.436, 0.01, 10, 40);
@@ -336,12 +346,12 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
     vinegarGeo.rotateX(-Math.PI / 2);
     const gingerStripGeo = createGingerStripGeometry();
 
-    // v2 Tactile PBR Materials
+    // v3 Look-Dev PBR Materials with 512x512 RGB Normal Maps & Backlit Amber SSS
     const bambooMat = new THREE.MeshStandardMaterial({
       color: '#F6E4C2',
       map: bambooPbr.map,
-      bumpMap: bambooPbr.bumpMap,
-      bumpScale: 0.026,
+      normalMap: bambooPbr.normalMap,
+      normalScale: new THREE.Vector2(1.0, 1.0),
       roughnessMap: bambooPbr.roughnessMap,
       roughness: 0.9,
       metalness: 0.0,
@@ -350,8 +360,8 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
     const bambooLowerMat = new THREE.MeshStandardMaterial({
       color: '#E7CEA0',
       map: bambooPbr.map,
-      bumpMap: bambooPbr.bumpMap,
-      bumpScale: 0.024,
+      normalMap: bambooPbr.normalMap,
+      normalScale: new THREE.Vector2(0.95, 0.95),
       roughnessMap: bambooPbr.roughnessMap,
       roughness: 0.92,
       metalness: 0.0,
@@ -360,8 +370,8 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
     const bambooSlatMat = new THREE.MeshStandardMaterial({
       color: '#DFC391',
       map: bambooPbr.map,
-      bumpMap: bambooPbr.bumpMap,
-      bumpScale: 0.022,
+      normalMap: bambooPbr.normalMap,
+      normalScale: new THREE.Vector2(0.9, 0.9),
       roughnessMap: bambooPbr.roughnessMap,
       roughness: 0.9,
       metalness: 0.0,
@@ -370,8 +380,8 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
     const rattanMat = new THREE.MeshStandardMaterial({
       color: '#B5854A',
       map: rattanTex,
-      bumpMap: bambooPbr.bumpMap,
-      bumpScale: 0.028,
+      normalMap: bambooPbr.normalMap,
+      normalScale: new THREE.Vector2(1.1, 1.1),
       roughness: 0.86,
       metalness: 0.0,
     });
@@ -379,8 +389,8 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
     // Translucent steam-dampened steamer parchment liner
     const parchmentMat = new THREE.MeshPhysicalMaterial({
       color: '#FAF4E8',
-      bumpMap: parchmentBump,
-      bumpScale: 0.008,
+      normalMap: parchmentNormal,
+      normalScale: new THREE.Vector2(0.5, 0.5),
       roughness: 0.52,
       metalness: 0.0,
       clearcoat: 0.24,
@@ -390,45 +400,35 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
       side: THREE.DoubleSide,
     });
 
-    // Thin translucent steamed Xiaolongbao skin revealing warm soup pooled inside
-    const dumplingMat = new THREE.MeshPhysicalMaterial({
-      color: '#FFFFFF',
-      vertexColors: true,
-      bumpMap: doughBump,
-      bumpScale: 0.004,
-      roughness: 0.24,
-      metalness: 0.0,
-      clearcoat: 0.35,
-      clearcoatRoughness: 0.26,
-      transmission: 0.24,
-      thickness: 0.35,
-      attenuationColor: new THREE.Color('#D9A76A'),
-      attenuationDistance: 0.52,
-      sheen: 0.55,
-      sheenColor: new THREE.Color('#FFE8C6'),
-      sheenRoughness: 0.45,
-    });
+    // Authentic soup-filled Xiaolongbao skin: backlit warm amber SSS + vertex soup-belly gradient
+    const dumplingMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#FFFFFF',
+        vertexColors: true,
+        normalMap: doughNormal,
+        normalScale: new THREE.Vector2(0.45, 0.45),
+        roughness: 0.28,
+        metalness: 0.0,
+        clearcoat: 0.34,
+        clearcoatRoughness: 0.28,
+        sheen: 0.55,
+        sheenColor: new THREE.Color('#FFE8C6'),
+        sheenRoughness: 0.45,
+      }),
+      { color: '#F2B86B', intensity: 0.62, power: 2.3, scale: 1.15 }
+    );
 
-    // Darker-amber savory pork-broth core tucked inside each dumpling's lower belly
-    const brothCoreMat = new THREE.MeshStandardMaterial({
-      color: '#9C5020',
-      emissive: new THREE.Color('#4E2108'),
-      emissiveIntensity: 0.25,
-      roughness: 0.28,
-      metalness: 0.0,
-    });
-
-    // Artisanal glazed porcelain saucer with subtle stoneware grain
+    // Artisanal glazed porcelain saucer with Sobel stoneware normal relief
     const porcelainMat = new THREE.MeshPhysicalMaterial({
       color: '#FDFBF7',
       map: stonewarePbr.map,
-      bumpMap: stonewarePbr.bumpMap,
-      bumpScale: 0.005,
+      normalMap: stonewarePbr.normalMap,
+      normalScale: new THREE.Vector2(0.5, 0.5),
       roughnessMap: stonewarePbr.roughnessMap,
-      roughness: 0.22,
+      roughness: 0.2,
       metalness: 0.0,
-      clearcoat: 0.92,
-      clearcoatRoughness: 0.06,
+      clearcoat: 0.94,
+      clearcoatRoughness: 0.05,
     });
 
     const cobaltMat = new THREE.MeshPhysicalMaterial({
@@ -437,25 +437,29 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
       clearcoat: 0.88,
     });
 
-    // Mirror-glossy aged Zhenjiang black vinegar
+    // Mirror-glossy aged Zhenjiang black vinegar catching crisp studio softbox reflections
     const vinegarMat = new THREE.MeshPhysicalMaterial({
-      color: '#200D08',
-      roughness: 0.04,
-      metalness: 0.05,
+      color: '#1C0B06',
+      roughness: 0.03,
+      metalness: 0.04,
       clearcoat: 1.0,
       clearcoatRoughness: 0.02,
+      ior: 1.36,
       reflectivity: 1.0,
     });
 
-    // Crisp julienned pale-gold fresh young ginger strips
-    const gingerStripMat = new THREE.MeshPhysicalMaterial({
-      color: '#E8C97A',
-      bumpMap: gingerBump,
-      bumpScale: 0.006,
-      roughness: 0.34,
-      clearcoat: 0.42,
-      clearcoatRoughness: 0.22,
-    });
+    // Backlit pale-gold julienned fresh young ginger strips
+    const gingerStripMat = applyFoodSSS(
+      new THREE.MeshPhysicalMaterial({
+        color: '#E8C97A',
+        normalMap: gingerNormal,
+        normalScale: new THREE.Vector2(0.5, 0.5),
+        roughness: 0.3,
+        clearcoat: 0.45,
+        clearcoatRoughness: 0.2,
+      }),
+      { color: '#FFE49E', intensity: 0.52, power: 2.2, scale: 1.15 }
+    );
 
     return {
       localTextures: [rattanTex],
@@ -467,8 +471,7 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
         slatGeos,
         parchmentGeo,
         lashingGeo,
-        dumplingGeo,
-        brothCoreGeo,
+        dumplingGeos,
         saucerGeo,
         cobaltOuterRimGeo,
         cobaltInnerRingGeo,
@@ -482,7 +485,6 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
         rattanMat,
         parchmentMat,
         dumplingMat,
-        brothCoreMat,
         porcelainMat,
         cobaltMat,
         vinegarMat,
@@ -502,8 +504,7 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
       g.slatGeos.forEach((sg) => sg.dispose());
       g.parchmentGeo.dispose();
       g.lashingGeo.dispose();
-      g.dumplingGeo.dispose();
-      g.brothCoreGeo.dispose();
+      g.dumplingGeos.forEach((dg) => dg.dispose());
       g.saucerGeo.dispose();
       g.cobaltOuterRimGeo.dispose();
       g.cobaltInnerRingGeo.dispose();
@@ -538,12 +539,14 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
             material={assets.materials.rattanMat}
             position={[0, STEAMER_BASE_Y + 0.04, 0]}
             castShadow
+            receiveShadow
           />
           <mesh
             geometry={assets.geometries.lowerRimBandGeo}
             material={assets.materials.rattanMat}
             position={[0, STEAMER_BASE_Y + 0.28, 0]}
             castShadow
+            receiveShadow
           />
 
           <mesh
@@ -558,12 +561,14 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
             material={assets.materials.rattanMat}
             position={[0, STEAMER_BASE_Y + 0.36, 0]}
             castShadow
+            receiveShadow
           />
           <mesh
             geometry={assets.geometries.upperRimBandGeo}
             material={assets.materials.rattanMat}
             position={[0, STEAMER_BASE_Y + 0.65, 0]}
             castShadow
+            receiveShadow
           />
 
           {[-0.08, 0, 0.08].map((offsetAngle, idx) => {
@@ -575,6 +580,8 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
                 material={assets.materials.rattanMat}
                 position={[Math.cos(a) * 1.125, STEAMER_BASE_Y + 0.5, Math.sin(a) * 1.125]}
                 rotation={[0, -a + Math.PI / 2, 0]}
+                castShadow
+                receiveShadow
               />
             );
           })}
@@ -585,6 +592,7 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
               geometry={assets.geometries.slatGeos[idx]}
               material={assets.materials.bambooSlatMat}
               position={[0, STEAMER_FLOOR_Y - 0.018, z]}
+              castShadow
               receiveShadow
             />
           ))}
@@ -598,7 +606,7 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
         </group>
       </FoodLayer>
 
-      {/* 2. 18-PLEAT SOUP DUMPLINGS (5 plump Xiaolongbao with translucent skin + inner broth core) */}
+      {/* 2. 18-PLEAT SOUP DUMPLINGS (5 plump Xiaolongbao with backlit amber SSS + organic belly sag) */}
       <FoodLayer
         partId="dumplings"
         label="18-Pleat Soup Dumplings"
@@ -618,14 +626,8 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
             rotation={[0, d.rotY, 0]}
             scale={d.scale}
           >
-            {/* Inner darker-amber pork-broth core glimpsed through translucent dumpling skin */}
             <mesh
-              geometry={assets.geometries.brothCoreGeo}
-              material={assets.materials.brothCoreMat}
-            />
-            {/* Thin translucent 18-pleat steamed dumpling skin */}
-            <mesh
-              geometry={assets.geometries.dumplingGeo}
+              geometry={assets.geometries.dumplingGeos[i]}
               material={assets.materials.dumplingMat}
               castShadow
               receiveShadow
@@ -656,6 +658,7 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
             geometry={assets.geometries.cobaltOuterRimGeo}
             material={assets.materials.cobaltMat}
             position={[0, 0.162, 0]}
+            castShadow
           />
           <mesh
             geometry={assets.geometries.cobaltInnerRingGeo}
@@ -679,6 +682,8 @@ export function DimSumModel({ exploded, highlightedPart, onSelectPart }: FoodMod
                 position={[strip.x, 0, strip.z]}
                 rotation={[0, strip.rotY, 0]}
                 scale={strip.scale}
+                castShadow
+                receiveShadow
               />
             ))}
           </group>

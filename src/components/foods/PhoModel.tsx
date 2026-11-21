@@ -5,9 +5,13 @@ import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { FoodModelProps } from '@/types/dish';
 import {
-  createBrothShaderMaterial,
-  getOrganicNoiseBump,
+  applyFoodSSS,
+  applyWetnessVertexColors,
+  createPbrBrothMaterial,
+  displaceGeometryOrganic,
+  getOrganicNormalMap,
   getStonewareTextures,
+  updateBrothMaterial,
 } from '@/lib/proceduralTextures';
 import { FoodLayer } from './FoodLayer';
 
@@ -35,6 +39,12 @@ interface HerbLeafSpec {
   rot: [number, number, number];
   scale: number;
 }
+
+const NORMAL_SCALE_OUTER_BOWL = new THREE.Vector2(0.78, 0.78);
+const NORMAL_SCALE_INNER_BOWL = new THREE.Vector2(0.28, 0.28);
+const NORMAL_SCALE_RIM = new THREE.Vector2(0.68, 0.68);
+const NORMAL_SCALE_GARNISH = new THREE.Vector2(0.55, 0.55);
+const NORMAL_SCALE_ANISE = new THREE.Vector2(0.8, 0.8);
 
 const SCALLION_RINGS: ScallionRing[] = [
   { pos: [0.18, 0.145, 0.44], rot: [Math.PI / 2 + 0.08, 0.1, 0.3], radius: 0.056, light: false },
@@ -78,18 +88,25 @@ const HERB_LEAVES: HerbLeafSpec[] = [
 ];
 
 const OIL_DROPLETS: [number, number, number, number][] = [
-  [0.78, 0.129, 0.28, 0.052],
-  [-0.74, 0.129, 0.42, 0.044],
-  [0.44, 0.129, -0.68, 0.048],
-  [-0.12, 0.129, 0.78, 0.042],
-  [0.86, 0.129, -0.14, 0.038],
-  [-0.68, 0.129, -0.52, 0.046],
-  [0.08, 0.129, -0.78, 0.04],
-  [-0.86, 0.129, 0.04, 0.044],
+  [0.78, 0.13, 0.28, 0.052],
+  [-0.74, 0.13, 0.42, 0.044],
+  [0.44, 0.13, -0.68, 0.048],
+  [-0.12, 0.13, 0.78, 0.042],
+  [0.86, 0.13, -0.14, 0.038],
+  [-0.68, 0.13, -0.52, 0.046],
+  [0.08, 0.13, -0.78, 0.04],
+  [-0.86, 0.13, 0.04, 0.044],
 ];
 
-const PHO_BROTH_BASE_COLOR = new THREE.Color('#7B3E10');
-const PHO_BROTH_HI_COLOR = new THREE.Color('#A85B1B');
+function createSeededRand(seed: number): () => number {
+  let a = seed | 0;
+  return () => {
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 export function PhoModel({
   exploded,
@@ -104,23 +121,117 @@ export function PhoModel({
     onSelectPart(highlightedPart === partId ? null : partId);
   };
 
-  // Shared cached procedural PBR textures (do NOT dispose cached singletons)
+  // Shared cached 512x512 Sobel RGB procedural textures (NEVER dispose cached singletons)
   const stonewareTex = useMemo(() => getStonewareTextures(), []);
-  const beefBump = useMemo(() => getOrganicNoiseBump(409, 12), []);
-  const noodleBump = useMemo(() => getOrganicNoiseBump(307, 14), []);
-  const garnishBump = useMemo(() => getOrganicNoiseBump(433, 12), []);
+  const beefNormal = useMemo(() => getOrganicNormalMap(409, 12, 1.8), []);
+  const noodleNormal = useMemo(() => getOrganicNormalMap(307, 14, 0.9), []);
+  const garnishNormal = useMemo(() => getOrganicNormalMap(433, 12, 1.5), []);
 
-  // Per-instance animated GLSL broth shader (disposed cleanly on unmount)
-  const brothShaderMat = useMemo(
+  // Per-instance real PBR studio-reflecting broth + SSS materials (disposed on unmount)
+  const brothMat = useMemo(
     () =>
-      createBrothShaderMaterial({
+      createPbrBrothMaterial({
         baseColor: '#7B3E10',
         oilColor: '#D99A2E',
         sheenColor: '#FFF0C4',
         isSpicy: false,
-        opacity: 0.86,
+        opacity: 0.88,
       }),
     []
+  );
+
+  const noodleMat = useMemo(
+    () =>
+      applyFoodSSS(
+        new THREE.MeshPhysicalMaterial({
+          color: '#FFFFFF',
+          vertexColors: true,
+          normalMap: noodleNormal,
+          normalScale: new THREE.Vector2(0.32, 0.32),
+          roughness: 0.18,
+          clearcoat: 0.72,
+          clearcoatRoughness: 0.12,
+          emissive: new THREE.Color('#6B5636'),
+          emissiveIntensity: 0,
+        }),
+        { color: '#FFF0D2', intensity: 0.34, power: 2.6, scale: 1.1 }
+      ),
+    [noodleNormal]
+  );
+
+  const beefOuterMat = useMemo(
+    () =>
+      applyFoodSSS(
+        new THREE.MeshPhysicalMaterial({
+          color: '#FFFFFF',
+          vertexColors: true,
+          normalMap: beefNormal,
+          normalScale: new THREE.Vector2(0.85, 0.85),
+          roughness: 0.32,
+          clearcoat: 0.54,
+          clearcoatRoughness: 0.18,
+          emissive: new THREE.Color('#6E1E1A'),
+          emissiveIntensity: 0,
+        }),
+        { color: '#D85A4A', intensity: 0.48, power: 2.3, scale: 1.15 }
+      ),
+    [beefNormal]
+  );
+
+  const beefCenterMat = useMemo(
+    () =>
+      applyFoodSSS(
+        new THREE.MeshPhysicalMaterial({
+          color: '#B8564E',
+          normalMap: beefNormal,
+          normalScale: new THREE.Vector2(0.65, 0.65),
+          roughness: 0.24,
+          clearcoat: 0.68,
+          clearcoatRoughness: 0.14,
+          sheen: 0.26,
+          sheenColor: new THREE.Color('#E8A096'),
+          emissive: new THREE.Color('#7A241E'),
+          emissiveIntensity: 0,
+        }),
+        { color: '#E0685A', intensity: 0.5, power: 2.2, scale: 1.15 }
+      ),
+    [beefNormal]
+  );
+
+  const basilMat = useMemo(
+    () =>
+      applyFoodSSS(
+        new THREE.MeshPhysicalMaterial({
+          color: '#43842E',
+          normalMap: garnishNormal,
+          normalScale: new THREE.Vector2(0.58, 0.58),
+          roughness: 0.34,
+          clearcoat: 0.38,
+          clearcoatRoughness: 0.26,
+          emissive: new THREE.Color('#1C4612'),
+          emissiveIntensity: 0,
+        }),
+        { color: '#78C848', intensity: 0.55, power: 2.2, scale: 1.15 }
+      ),
+    [garnishNormal]
+  );
+
+  const limeFleshMat = useMemo(
+    () =>
+      applyFoodSSS(
+        new THREE.MeshPhysicalMaterial({
+          color: '#C6E462',
+          normalMap: garnishNormal,
+          normalScale: new THREE.Vector2(0.45, 0.45),
+          roughness: 0.1,
+          clearcoat: 0.94,
+          clearcoatRoughness: 0.06,
+          emissive: new THREE.Color('#4C6410'),
+          emissiveIntensity: 0,
+        }),
+        { color: '#C8F060', intensity: 0.62, power: 2.2, scale: 1.2 }
+      ),
+    [garnishNormal]
   );
 
   // Classic deep Vietnamese ceramic bowl (outer indigo stoneware + inner celadon/ivory glaze)
@@ -156,7 +267,7 @@ export function PhoModel({
     return { outerBowlGeo: outer, innerBowlGeo: inner };
   }, []);
 
-  // Rich translucent amber beef broth body matching the bowl interior
+  // Rich amber beef broth body matching the bowl interior
   const brothGeo = useMemo(() => {
     const pts = [
       new THREE.Vector2(0.0, -0.4),
@@ -167,89 +278,64 @@ export function PhoModel({
       new THREE.Vector2(1.17, 0.12),
       new THREE.Vector2(0.0, 0.12),
     ];
-    const geo = new THREE.LatheGeometry(pts, 56);
+    const geo = new THREE.LatheGeometry(pts, 60);
     geo.computeVertexNormals();
     return geo;
   }, []);
 
-  // Organic coiled flat rice noodles (multiple sinuous TubeGeometry ribbons)
+  // Dense tangled nest of 24 varied flat rice noodles with wetness darkening at broth line
   const noodleGeos = useMemo(() => {
-    const curves: THREE.CatmullRomCurve3[] = [
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(-0.78, 0.02, 0.24),
-        new THREE.Vector3(-0.35, 0.16, 0.52),
-        new THREE.Vector3(0.24, 0.14, 0.44),
-        new THREE.Vector3(0.68, 0.12, 0.12),
-        new THREE.Vector3(0.56, 0.08, -0.36),
-        new THREE.Vector3(0.05, 0.15, -0.48),
-      ]),
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(-0.62, 0.06, -0.42),
-        new THREE.Vector3(-0.18, 0.17, -0.26),
-        new THREE.Vector3(0.32, 0.16, -0.14),
-        new THREE.Vector3(0.74, 0.09, 0.22),
-        new THREE.Vector3(0.34, 0.13, 0.64),
-        new THREE.Vector3(-0.22, 0.07, 0.56),
-      ]),
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(-0.84, 0.04, -0.06),
-        new THREE.Vector3(-0.42, 0.15, 0.18),
-        new THREE.Vector3(0.08, 0.18, 0.22),
-        new THREE.Vector3(0.48, 0.14, -0.04),
-        new THREE.Vector3(0.32, 0.11, -0.58),
-      ]),
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0.82, 0.05, -0.18),
-        new THREE.Vector3(0.44, 0.16, -0.34),
-        new THREE.Vector3(-0.08, 0.14, -0.52),
-        new THREE.Vector3(-0.56, 0.12, -0.22),
-        new THREE.Vector3(-0.48, 0.14, 0.34),
-      ]),
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(-0.3, 0.08, 0.72),
-        new THREE.Vector3(0.18, 0.17, 0.34),
-        new THREE.Vector3(0.54, 0.16, 0.04),
-        new THREE.Vector3(0.18, 0.15, -0.24),
-        new THREE.Vector3(-0.34, 0.12, -0.04),
-      ]),
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0.62, 0.04, 0.44),
-        new THREE.Vector3(0.14, 0.16, 0.58),
-        new THREE.Vector3(-0.38, 0.15, 0.44),
-        new THREE.Vector3(-0.72, 0.09, 0.08),
-        new THREE.Vector3(-0.42, 0.06, -0.46),
-      ]),
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(-0.14, 0.04, -0.74),
-        new THREE.Vector3(0.28, 0.15, -0.44),
-        new THREE.Vector3(0.68, 0.12, -0.04),
-        new THREE.Vector3(0.42, 0.15, 0.38),
-        new THREE.Vector3(-0.08, 0.12, 0.28),
-      ]),
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0.06, 0.13, -0.06),
-        new THREE.Vector3(0.36, 0.19, 0.16),
-        new THREE.Vector3(0.04, 0.18, 0.44),
-        new THREE.Vector3(-0.36, 0.14, 0.16),
-        new THREE.Vector3(-0.12, 0.16, -0.24),
-      ]),
-      new THREE.CatmullRomCurve3([
-        new THREE.Vector3(0.76, 0.06, 0.02),
-        new THREE.Vector3(0.52, 0.15, 0.42),
-        new THREE.Vector3(0.02, 0.14, 0.68),
-        new THREE.Vector3(-0.54, 0.09, 0.48),
-      ]),
-    ];
+    const rand = createSeededRand(7741);
+    const strands: THREE.BufferGeometry[] = [];
+    const strandCount = 24;
 
-    return curves.map((curve, idx) => {
-      const geo = new THREE.TubeGeometry(curve, 44, idx % 2 === 0 ? 0.044 : 0.038, 10, false);
-      geo.scale(1, 0.42, 1);
+    for (let s = 0; s < strandCount; s++) {
+      const startAngle = (s / strandCount) * Math.PI * 2 + (rand() - 0.5) * 0.45;
+      const sweep = (1.1 + rand() * 1.35) * (s % 2 === 0 ? 1 : -1);
+      const baseRadius = 0.22 + (s % 5) * 0.15 + rand() * 0.1;
+      const pts: THREE.Vector3[] = [];
+      const controlCount = 6;
+
+      for (let k = 0; k < controlCount; k++) {
+        const u = k / (controlCount - 1);
+        const angle = startAngle + sweep * u + Math.sin(u * Math.PI * 2 + s) * 0.34;
+        const radialWave = Math.sin(u * Math.PI * 1.5 + s * 1.3) * 0.22;
+        const r = THREE.MathUtils.clamp(baseRadius + radialWave + (rand() - 0.5) * 0.12, 0.08, 0.92);
+        // Crest above broth in middle of loop, dive gently below broth at ends
+        const arch = Math.sin(u * Math.PI);
+        const heightBias = s < 14 ? 0.18 : 0.145;
+        const y = 0.03 + arch * (heightBias + rand() * 0.035) + (rand() - 0.5) * 0.02;
+        pts.push(new THREE.Vector3(Math.cos(angle) * r, y, Math.sin(angle) * r));
+      }
+
+      const curve = new THREE.CatmullRomCurve3(pts);
+      const radius = 0.026 + (s % 3) * 0.007;
+      const geo = new THREE.TubeGeometry(curve, 34, radius, 8, false);
+      // Flatten along Y while preserving actual world Y height around center so ribbons look flat
+      const posAttr = geo.attributes.position;
+      for (let i = 0; i < posAttr.count; i++) {
+        const vx = posAttr.getX(i);
+        const vy = posAttr.getY(i);
+        const vz = posAttr.getZ(i);
+        // Compress thickness slightly around broth level to keep flat bánh phở ribbon feel
+        posAttr.setXYZ(i, vx, 0.11 + (vy - 0.11) * 0.65, vz);
+      }
+      posAttr.needsUpdate = true;
       geo.computeVertexNormals();
-      return geo;
-    });
+
+      applyWetnessVertexColors(geo, {
+        wetY: 0.118,
+        bandHeight: 0.065,
+        dryColor: '#FCF8EE',
+        wetColor: '#C2935C',
+      });
+      strands.push(geo);
+    }
+
+    return strands;
   }, []);
 
-  // Soft wavy thin-sliced rare beef geometry (outer seared rim + tender rosy center)
+  // Organically sculpted wavy thin-sliced rare beef with wetness vertex gradient
   const { beefOuterGeo, beefCenterGeo } = useMemo(() => {
     const outerShape = new THREE.Shape();
     outerShape.moveTo(-0.32, -0.02);
@@ -269,7 +355,7 @@ export function PhoModel({
       bevelThickness: 0.01,
       bevelSize: 0.012,
       bevelSegments: 3,
-      curveSegments: 18,
+      curveSegments: 20,
     });
     outer.rotateX(-Math.PI / 2);
     const oPos = outer.attributes.position;
@@ -279,7 +365,18 @@ export function PhoModel({
       const z = oPos.getZ(i);
       oPos.setY(i, y + Math.sin(x * 7.5 + z * 3.0) * 0.032);
     }
-    outer.computeVertexNormals();
+    displaceGeometryOrganic(outer, {
+      amplitude: 0.012,
+      frequency: 9.0,
+      seed: 409,
+      preserveSeam: true,
+    });
+    applyWetnessVertexColors(outer, {
+      wetY: -0.012,
+      bandHeight: 0.048,
+      dryColor: '#913A34',
+      wetColor: '#581D17',
+    });
 
     const inner = new THREE.ExtrudeGeometry(innerShape, {
       depth: 0.032,
@@ -297,12 +394,17 @@ export function PhoModel({
       const z = iPos.getZ(i);
       iPos.setY(i, y + Math.sin(x * 7.5 + z * 3.0) * 0.032 + 0.004);
     }
-    inner.computeVertexNormals();
+    displaceGeometryOrganic(inner, {
+      amplitude: 0.009,
+      frequency: 9.0,
+      seed: 409,
+      preserveSeam: true,
+    });
 
     return { beefOuterGeo: outer, beefCenterGeo: inner };
   }, []);
 
-  // Sculpted Thai basil / cilantro leaf geometry
+  // Organically cupped Thai basil / cilantro leaf geometry
   const leafGeo = useMemo(() => {
     const s = new THREE.Shape();
     s.moveTo(0, 0);
@@ -323,11 +425,16 @@ export function PhoModel({
       const z = pos.getZ(i);
       pos.setY(i, y + Math.sin(-z * 8.5) * 0.025 + Math.abs(x) * 0.14);
     }
-    geo.computeVertexNormals();
+    displaceGeometryOrganic(geo, {
+      amplitude: 0.008,
+      frequency: 14.0,
+      seed: 441,
+      preserveSeam: true,
+    });
     return geo;
   }, []);
 
-  // Vibrant lime wedge geometry (rind + pith + translucent juicy chartreuse flesh)
+  // Vibrant lime wedge geometry (rind + pith + backlit SSS juicy flesh)
   const { limeRindGeo, limePithGeo, limeFleshGeo } = useMemo(() => {
     const rindShape = new THREE.Shape();
     rindShape.absarc(0, 0, 0.27, 0, Math.PI, false);
@@ -377,7 +484,12 @@ export function PhoModel({
       limeRindGeo.dispose();
       limePithGeo.dispose();
       limeFleshGeo.dispose();
-      brothShaderMat.dispose();
+      brothMat.dispose();
+      noodleMat.dispose();
+      beefOuterMat.dispose();
+      beefCenterMat.dispose();
+      basilMat.dispose();
+      limeFleshMat.dispose();
     };
   }, [
     outerBowlGeo,
@@ -390,7 +502,12 @@ export function PhoModel({
     limeRindGeo,
     limePithGeo,
     limeFleshGeo,
-    brothShaderMat,
+    brothMat,
+    noodleMat,
+    beefOuterMat,
+    beefCenterMat,
+    basilMat,
+    limeFleshMat,
   ]);
 
   const isBowlHi = highlightedPart === 'bowl';
@@ -400,14 +517,22 @@ export function PhoModel({
   const isGarnishHi = highlightedPart === 'garnish';
 
   useEffect(() => {
-    brothShaderMat.uniforms.uBaseColor.value.copy(
-      isBrothHi ? PHO_BROTH_HI_COLOR : PHO_BROTH_BASE_COLOR
-    );
-  }, [isBrothHi, brothShaderMat]);
+    noodleMat.emissiveIntensity = isNoodlesHi ? 0.22 : 0;
+  }, [isNoodlesHi, noodleMat]);
+
+  useEffect(() => {
+    beefOuterMat.emissiveIntensity = isBeefHi ? 0.3 : 0;
+    beefCenterMat.emissiveIntensity = isBeefHi ? 0.3 : 0;
+  }, [isBeefHi, beefOuterMat, beefCenterMat]);
+
+  useEffect(() => {
+    basilMat.emissiveIntensity = isGarnishHi ? 0.32 : 0;
+    limeFleshMat.emissiveIntensity = isGarnishHi ? 0.3 : 0;
+  }, [isGarnishHi, basilMat, limeFleshMat]);
 
   useFrame((state) => {
     const t = state.clock.elapsedTime;
-    brothShaderMat.uniforms.uTime.value = t;
+    updateBrothMaterial(brothMat, t, isBrothHi);
 
     if (brothGroupRef.current) {
       brothGroupRef.current.position.y = Math.sin(t * 1.4) * 0.004;
@@ -433,67 +558,63 @@ export function PhoModel({
         onSelect={handleSelect}
       >
         <group>
-          {/* Matte artisanal indigo/charcoal stoneware exterior */}
           <mesh geometry={outerBowlGeo} castShadow receiveShadow>
             <meshPhysicalMaterial
               color="#2B303A"
-              bumpMap={stonewareTex.bumpMap}
-              bumpScale={0.024}
+              normalMap={stonewareTex.normalMap}
+              normalScale={NORMAL_SCALE_OUTER_BOWL}
               roughnessMap={stonewareTex.roughnessMap}
               roughness={0.82}
               metalness={0.04}
-              clearcoat={0.2}
-              clearcoatRoughness={0.5}
+              clearcoat={0.22}
+              clearcoatRoughness={0.48}
               emissive="#3A4259"
-              emissiveIntensity={isBowlHi ? 0.32 : 0}
+              emissiveIntensity={isBowlHi ? 0.3 : 0}
             />
           </mesh>
 
-          {/* Glossy warm celadon-ivory stoneware glazed interior */}
           <mesh geometry={innerBowlGeo} receiveShadow>
             <meshPhysicalMaterial
               color="#F2EFE7"
               map={stonewareTex.map}
-              bumpMap={stonewareTex.bumpMap}
-              bumpScale={0.009}
+              normalMap={stonewareTex.normalMap}
+              normalScale={NORMAL_SCALE_INNER_BOWL}
               roughness={0.18}
-              clearcoat={0.72}
-              clearcoatRoughness={0.16}
+              clearcoat={0.74}
+              clearcoatRoughness={0.14}
               emissive="#5A452C"
-              emissiveIntensity={isBowlHi ? 0.22 : 0}
+              emissiveIntensity={isBowlHi ? 0.2 : 0}
             />
           </mesh>
 
-          {/* Matte hand-thrown terracotta rim accent */}
-          <mesh position={[0, 0.268, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow>
+          <mesh position={[0, 0.268, 0]} rotation={[Math.PI / 2, 0, 0]} castShadow receiveShadow>
             <torusGeometry args={[1.318, 0.032, 16, 72]} />
             <meshStandardMaterial
               color="#B55A38"
-              bumpMap={stonewareTex.bumpMap}
-              bumpScale={0.02}
+              normalMap={stonewareTex.normalMap}
+              normalScale={NORMAL_SCALE_RIM}
               roughnessMap={stonewareTex.roughnessMap}
               roughness={0.72}
               emissive="#7A2D12"
-              emissiveIntensity={isBowlHi ? 0.32 : 0}
+              emissiveIntensity={isBowlHi ? 0.3 : 0}
             />
           </mesh>
 
-          {/* Decorative exterior stoneware groove band */}
           <mesh position={[0, 0.08, 0]} rotation={[Math.PI / 2, 0, 0]}>
             <torusGeometry args={[1.255, 0.012, 10, 64]} />
             <meshStandardMaterial
               color="#39404D"
-              bumpMap={stonewareTex.bumpMap}
-              bumpScale={0.016}
+              normalMap={stonewareTex.normalMap}
+              normalScale={NORMAL_SCALE_RIM}
               roughness={0.72}
               emissive="#3A4259"
-              emissiveIntensity={isBowlHi ? 0.28 : 0}
+              emissiveIntensity={isBowlHi ? 0.26 : 0}
             />
           </mesh>
         </group>
       </FoodLayer>
 
-      {/* Layer 2: Animated GLSL Charred-Spice Amber Beef Broth */}
+      {/* Layer 2: Real PBR Studio-Reflecting Charred-Spice Amber Beef Broth + Capillary Meniscus */}
       <FoodLayer
         partId="broth"
         label="Charred-Spice Beef Broth"
@@ -504,28 +625,48 @@ export function PhoModel({
         onSelect={handleSelect}
       >
         <group ref={brothGroupRef}>
-          <mesh geometry={brothGeo} material={brothShaderMat} receiveShadow />
+          <mesh geometry={brothGeo} material={brothMat} receiveShadow />
 
-          {/* Physical golden bone-marrow oil pearls catching specular light above the shader */}
+          {/* Delicate glistening capillary meniscus ring hugging the inner bowl wall */}
+          <mesh
+            position={[0, 0.128, 0]}
+            rotation={[Math.PI / 2, 0, 0]}
+            scale={[1, 1, 1.45]}
+          >
+            <torusGeometry args={[1.158, 0.015, 12, 72]} />
+            <meshPhysicalMaterial
+              color="#B46820"
+              transparent
+              opacity={0.78}
+              roughness={0.04}
+              clearcoat={1}
+              clearcoatRoughness={0.03}
+              ior={1.36}
+              emissive="#8A4608"
+              emissiveIntensity={isBrothHi ? 0.32 : 0.06}
+            />
+          </mesh>
+
+          {/* Physical golden marrow oil pearls catching crisp softbox highlights */}
           {OIL_DROPLETS.map(([x, y, z, r], idx) => (
-            <mesh key={`oil-${idx}`} position={[x, y, z]} scale={[1, 0.14, 1]}>
+            <mesh key={`oil-${idx}`} position={[x, y, z]} scale={[1, 0.14, 1]} receiveShadow>
               <sphereGeometry args={[r, 12, 10]} />
               <meshPhysicalMaterial
                 color="#D99A2E"
                 transparent
-                opacity={0.72}
-                roughness={0.05}
+                opacity={0.74}
+                roughness={0.04}
                 clearcoat={1}
-                clearcoatRoughness={0.04}
+                clearcoatRoughness={0.03}
                 emissive="#8A5208"
-                emissiveIntensity={isBrothHi ? 0.3 : 0}
+                emissiveIntensity={isBrothHi ? 0.28 : 0}
               />
             </mesh>
           ))}
         </group>
       </FoodLayer>
 
-      {/* Layer 3: Organic Coiled Nest of Silky Flat Rice Noodles */}
+      {/* Layer 3: Dense Tangled Nest of 24 Wetness-Shaded Flat Rice Noodles */}
       <FoodLayer
         partId="noodles"
         label="Flat Rice Noodles"
@@ -540,25 +681,15 @@ export function PhoModel({
             <mesh
               key={`noodle-${idx}`}
               geometry={geo}
+              material={noodleMat}
               castShadow
               receiveShadow
-            >
-              <meshPhysicalMaterial
-                color={idx % 3 === 0 ? '#FFFBF2' : '#FBF6EC'}
-                bumpMap={noodleBump}
-                bumpScale={0.006}
-                roughness={0.22}
-                clearcoat={0.62}
-                clearcoatRoughness={0.14}
-                emissive="#6B5636"
-                emissiveIntensity={isNoodlesHi ? 0.24 : 0}
-              />
-            </mesh>
+            />
           ))}
         </group>
       </FoodLayer>
 
-      {/* Layer 4: Rare Thin-Sliced Beef with Organic Meat Fiber Bump & Moist Sheen */}
+      {/* Layer 4: Organic Displaced Backlit SSS Rare Thin-Sliced Beef */}
       <FoodLayer
         partId="beef"
         label="Rare Thin-Sliced Beef"
@@ -576,34 +707,18 @@ export function PhoModel({
               rotation={slice.rot}
               scale={slice.scale}
             >
-              {/* Seared rosy-brown beef edge with fibrous organic bump */}
-              <mesh geometry={beefOuterGeo} castShadow receiveShadow>
-                <meshPhysicalMaterial
-                  color="#883631"
-                  bumpMap={beefBump}
-                  bumpScale={0.03}
-                  roughness={0.34}
-                  clearcoat={0.48}
-                  clearcoatRoughness={0.2}
-                  emissive="#6E1E1A"
-                  emissiveIntensity={isBeefHi ? 0.32 : 0}
-                />
-              </mesh>
-              {/* Moist tender rare rosy center */}
-              <mesh geometry={beefCenterGeo} castShadow>
-                <meshPhysicalMaterial
-                  color="#B8564E"
-                  bumpMap={beefBump}
-                  bumpScale={0.022}
-                  roughness={0.26}
-                  clearcoat={0.62}
-                  clearcoatRoughness={0.16}
-                  sheen={0.28}
-                  sheenColor="#E69B94"
-                  emissive="#7A241E"
-                  emissiveIntensity={isBeefHi ? 0.32 : 0}
-                />
-              </mesh>
+              <mesh
+                geometry={beefOuterGeo}
+                material={beefOuterMat}
+                castShadow
+                receiveShadow
+              />
+              <mesh
+                geometry={beefCenterGeo}
+                material={beefCenterMat}
+                castShadow
+                receiveShadow
+              />
             </group>
           ))}
 
@@ -612,14 +727,14 @@ export function PhoModel({
             { pos: [-0.22, 0.16, 0.34] as [number, number, number], rot: [Math.PI / 2 - 0.12, 0.1, 0.2] as [number, number, number], r: 0.14 },
             { pos: [-0.62, 0.155, -0.36] as [number, number, number], rot: [Math.PI / 2 + 0.1, -0.1, 0.5] as [number, number, number], r: 0.12 },
           ].map((onion, idx) => (
-            <mesh key={`onion-${idx}`} position={onion.pos} rotation={onion.rot}>
+            <mesh key={`onion-${idx}`} position={onion.pos} rotation={onion.rot} castShadow>
               <torusGeometry args={[onion.r, 0.014, 10, 32]} />
               <meshPhysicalMaterial
                 color="#F4EDE2"
                 transparent
                 opacity={0.86}
-                roughness={0.18}
-                clearcoat={0.65}
+                roughness={0.16}
+                clearcoat={0.72}
                 emissive="#5A4A36"
                 emissiveIntensity={isBeefHi ? 0.22 : 0}
               />
@@ -628,7 +743,7 @@ export function PhoModel({
         </group>
       </FoodLayer>
 
-      {/* Layer 5: Scallions, 8-Pointed Star Anise, Chilies, Herbs & Translucent Lime Wedge */}
+      {/* Layer 5: Scallions, 8-Pointed Star Anise, Chilies, SSS Basil & SSS Lime Wedge */}
       <FoodLayer
         partId="garnish"
         label="Scallions, Star Anise & Lime"
@@ -639,7 +754,6 @@ export function PhoModel({
         onSelect={handleSelect}
       >
         <group>
-          {/* Floating herbs, scallions & chili rings */}
           <group ref={floatGarnishRef}>
             {SCALLION_RINGS.map((ring, idx) => (
               <mesh
@@ -647,21 +761,21 @@ export function PhoModel({
                 position={ring.pos}
                 rotation={ring.rot}
                 castShadow
+                receiveShadow
               >
                 <torusGeometry args={[ring.radius, 0.015, 10, 20]} />
                 <meshPhysicalMaterial
                   color={ring.light ? '#84BA5A' : '#4D8B31'}
-                  bumpMap={garnishBump}
-                  bumpScale={0.008}
-                  roughness={0.32}
-                  clearcoat={0.44}
+                  normalMap={garnishNormal}
+                  normalScale={NORMAL_SCALE_GARNISH}
+                  roughness={0.3}
+                  clearcoat={0.48}
                   emissive="#204A10"
                   emissiveIntensity={isGarnishHi ? 0.34 : 0}
                 />
               </mesh>
             ))}
 
-            {/* Sliced red bird's-eye chili rings with seed centers */}
             {CHILI_RINGS.map((chili, idx) => (
               <group
                 key={`chili-${idx}`}
@@ -669,12 +783,12 @@ export function PhoModel({
                 rotation={chili.rot}
                 scale={chili.scale}
               >
-                <mesh castShadow>
+                <mesh castShadow receiveShadow>
                   <torusGeometry args={[0.042, 0.014, 10, 18]} />
                   <meshPhysicalMaterial
                     color="#D4261C"
-                    roughness={0.18}
-                    clearcoat={0.82}
+                    roughness={0.16}
+                    clearcoat={0.85}
                     emissive="#7A0E08"
                     emissiveIntensity={isGarnishHi ? 0.36 : 0}
                   />
@@ -690,37 +804,29 @@ export function PhoModel({
               </group>
             ))}
 
-            {/* Fresh Thai basil / cilantro leaves */}
+            {/* Backlit SSS Thai basil leaves */}
             {HERB_LEAVES.map((leaf, idx) => (
               <mesh
                 key={`leaf-${idx}`}
                 geometry={leafGeo}
+                material={basilMat}
                 position={leaf.pos}
                 rotation={leaf.rot}
                 scale={leaf.scale}
                 castShadow
-              >
-                <meshPhysicalMaterial
-                  color={idx % 2 === 0 ? '#3B7A28' : '#4E9436'}
-                  bumpMap={garnishBump}
-                  bumpScale={0.014}
-                  roughness={0.38}
-                  clearcoat={0.34}
-                  emissive="#1C4612"
-                  emissiveIntensity={isGarnishHi ? 0.34 : 0}
-                />
-              </mesh>
+                receiveShadow
+              />
             ))}
           </group>
 
           {/* Sculptural 8-pointed dark brown star anise pod */}
           <group ref={starAniseRef} position={[0.16, 0.165, -0.02]}>
-            <mesh castShadow>
+            <mesh castShadow receiveShadow>
               <sphereGeometry args={[0.048, 14, 12]} />
               <meshStandardMaterial
                 color="#4E2A14"
-                bumpMap={garnishBump}
-                bumpScale={0.022}
+                normalMap={garnishNormal}
+                normalScale={NORMAL_SCALE_ANISE}
                 roughness={0.62}
                 emissive="#4A1F0A"
                 emissiveIntensity={isGarnishHi ? 0.38 : 0}
@@ -735,24 +841,24 @@ export function PhoModel({
                     rotation={[0, 0, -Math.PI / 2 + 0.12]}
                     scale={[0.85, 1.0, 0.65]}
                     castShadow
+                    receiveShadow
                   >
                     <coneGeometry args={[0.042, 0.15, 8]} />
                     <meshStandardMaterial
                       color="#4E2A14"
-                      bumpMap={garnishBump}
-                      bumpScale={0.022}
+                      normalMap={garnishNormal}
+                      normalScale={NORMAL_SCALE_ANISE}
                       roughness={0.6}
                       emissive="#4A1F0A"
                       emissiveIntensity={isGarnishHi ? 0.38 : 0}
                     />
                   </mesh>
-                  {/* Glossy mahogany seed pearl peeking from the carpel */}
                   <mesh position={[0.075, 0.022, 0]} scale={[1.2, 0.7, 0.8]}>
                     <sphereGeometry args={[0.015, 8, 8]} />
                     <meshPhysicalMaterial
                       color="#753E1E"
-                      roughness={0.18}
-                      clearcoat={0.85}
+                      roughness={0.16}
+                      clearcoat={0.88}
                       emissive="#5A280A"
                       emissiveIntensity={isGarnishHi ? 0.36 : 0}
                     />
@@ -762,16 +868,16 @@ export function PhoModel({
             })}
           </group>
 
-          {/* Vibrant green lime wedge with translucent juicy citrus flesh */}
+          {/* Vibrant green lime wedge with backlit SSS juicy flesh */}
           <group position={[1.18, 0.34, -0.22]} rotation={[0.35, -0.35, -0.65]}>
             <mesh geometry={limeRindGeo} castShadow receiveShadow>
               <meshPhysicalMaterial
                 color="#67A42B"
-                bumpMap={garnishBump}
-                bumpScale={0.022}
-                roughness={0.46}
-                clearcoat={0.4}
-                clearcoatRoughness={0.3}
+                normalMap={garnishNormal}
+                normalScale={NORMAL_SCALE_GARNISH}
+                roughness={0.44}
+                clearcoat={0.44}
+                clearcoatRoughness={0.28}
                 emissive="#2B520A"
                 emissiveIntensity={isGarnishHi ? 0.32 : 0}
               />
@@ -784,24 +890,7 @@ export function PhoModel({
                 emissiveIntensity={isGarnishHi ? 0.22 : 0}
               />
             </mesh>
-            <mesh geometry={limeFleshGeo}>
-              <meshPhysicalMaterial
-                color="#C6E462"
-                bumpMap={garnishBump}
-                bumpScale={0.012}
-                transmission={0.22}
-                thickness={0.25}
-                ior={1.35}
-                attenuationColor="#A9CF38"
-                attenuationDistance={0.5}
-                roughness={0.12}
-                clearcoat={0.88}
-                clearcoatRoughness={0.08}
-                emissive="#4C6410"
-                emissiveIntensity={isGarnishHi ? 0.32 : 0}
-              />
-            </mesh>
-            {/* Radial citrus segment membrane lines */}
+            <mesh geometry={limeFleshGeo} material={limeFleshMat} castShadow receiveShadow />
             {[-0.9, -0.45, 0, 0.45, 0.9].map((ang, sIdx) => (
               <mesh
                 key={`seg-${sIdx}`}

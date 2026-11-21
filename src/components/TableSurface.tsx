@@ -17,6 +17,14 @@ export interface TableSurfaceProps {
 
 const noopRaycast = (): void => {};
 
+const LINEN_NORMAL_SCALE = new THREE.Vector2(0.55, 0.55);
+const CEDAR_NORMAL_SCALE = new THREE.Vector2(0.62, 0.62);
+const HINOKI_NORMAL_SCALE = new THREE.Vector2(0.45, 0.45);
+const WALNUT_NORMAL_SCALE = new THREE.Vector2(0.5, 0.5);
+const SLATE_NORMAL_SCALE = new THREE.Vector2(0.78, 0.78);
+const BAMBOO_NORMAL_SCALE = new THREE.Vector2(0.82, 0.82);
+const RATTAN_NORMAL_SCALE = new THREE.Vector2(0.65, 0.65);
+
 /** Builds a rounded rectangle THREE.Shape centered at (0, 0). */
 function createRoundedRectShape(width: number, depth: number, radius: number): THREE.Shape {
   const w = width / 2;
@@ -42,16 +50,19 @@ function createPizzaPeelShape(): THREE.Shape {
   const radius = 2.02;
   const neckAngle = 0.21;
 
-  // Sweep circular blade from +neckAngle around to (2*PI - neckAngle)
   shape.absarc(0, 0, radius, neckAngle, Math.PI * 2 - neckAngle, false);
 
-  // Smooth neck curve out into tapered paddle handle along +X
   shape.quadraticCurveTo(radius + 0.22, -0.34, radius + 0.45, -0.24);
   shape.lineTo(radius + 1.25, -0.19);
   shape.quadraticCurveTo(radius + 1.48, -0.17, radius + 1.48, 0);
   shape.quadraticCurveTo(radius + 1.48, 0.17, radius + 1.25, 0.19);
   shape.lineTo(radius + 0.45, 0.24);
-  shape.quadraticCurveTo(radius + 0.22, 0.34, Math.cos(neckAngle) * radius, Math.sin(neckAngle) * radius);
+  shape.quadraticCurveTo(
+    radius + 0.22,
+    0.34,
+    Math.cos(neckAngle) * radius,
+    Math.sin(neckAngle) * radius
+  );
 
   return shape;
 }
@@ -68,7 +79,7 @@ function normalizePlanarUVs(geometry: THREE.BufferGeometry, uvScale = 0.28): voi
 }
 
 export function TableSurface({ surface }: TableSurfaceProps) {
-  // Cached singleton PBR textures (never disposed by this component)
+  // Cached singleton 512x512 PBR textures (never disposed by this component)
   const linen = useMemo(() => getLinenTextures(), []);
   const cedar = useMemo(() => getWoodGrainTextures('cedar'), []);
   const hinoki = useMemo(() => getWoodGrainTextures('hinoki'), []);
@@ -143,8 +154,8 @@ export function TableSurface({ surface }: TableSurfaceProps) {
           <mesh geometry={geometries.linenGeo} receiveShadow raycast={noopRaycast}>
             <meshStandardMaterial
               map={linen.map}
-              bumpMap={linen.bumpMap}
-              bumpScale={0.014}
+              normalMap={linen.normalMap}
+              normalScale={LINEN_NORMAL_SCALE}
               roughnessMap={linen.roughnessMap}
               roughness={0.92}
               metalness={0.0}
@@ -176,8 +187,8 @@ export function TableSurface({ surface }: TableSurfaceProps) {
           <mesh geometry={geometries.peelGeo} receiveShadow raycast={noopRaycast}>
             <meshStandardMaterial
               map={cedar.map}
-              bumpMap={cedar.bumpMap}
-              bumpScale={0.018}
+              normalMap={cedar.normalMap}
+              normalScale={CEDAR_NORMAL_SCALE}
               roughnessMap={cedar.roughnessMap}
               roughness={0.76}
               metalness={0.02}
@@ -188,6 +199,7 @@ export function TableSurface({ surface }: TableSurfaceProps) {
           <mesh
             position={[3.18, 0.062, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
+            receiveShadow
             raycast={noopRaycast}
           >
             <circleGeometry args={[0.075, 20]} />
@@ -203,8 +215,8 @@ export function TableSurface({ surface }: TableSurfaceProps) {
           <mesh geometry={geometries.hinokiGeo} receiveShadow raycast={noopRaycast}>
             <meshStandardMaterial
               map={hinoki.map}
-              bumpMap={hinoki.bumpMap}
-              bumpScale={0.012}
+              normalMap={hinoki.normalMap}
+              normalScale={HINOKI_NORMAL_SCALE}
               roughnessMap={hinoki.roughnessMap}
               roughness={0.62}
               metalness={0.02}
@@ -216,6 +228,8 @@ export function TableSurface({ surface }: TableSurfaceProps) {
             <boxGeometry args={[0.065, 0.018, 3.06]} />
             <meshStandardMaterial
               map={walnut.map}
+              normalMap={walnut.normalMap}
+              normalScale={WALNUT_NORMAL_SCALE}
               roughnessMap={walnut.roughnessMap}
               roughness={0.65}
               color="#7C563C"
@@ -225,6 +239,8 @@ export function TableSurface({ surface }: TableSurfaceProps) {
             <boxGeometry args={[0.065, 0.018, 3.06]} />
             <meshStandardMaterial
               map={walnut.map}
+              normalMap={walnut.normalMap}
+              normalScale={WALNUT_NORMAL_SCALE}
               roughnessMap={walnut.roughnessMap}
               roughness={0.65}
               color="#7C563C"
@@ -240,8 +256,8 @@ export function TableSurface({ surface }: TableSurfaceProps) {
           <mesh geometry={geometries.slateGeo} receiveShadow raycast={noopRaycast}>
             <meshStandardMaterial
               map={slate.map}
-              bumpMap={slate.bumpMap}
-              bumpScale={0.024}
+              normalMap={slate.normalMap}
+              normalScale={SLATE_NORMAL_SCALE}
               roughnessMap={slate.roughnessMap}
               roughness={0.84}
               metalness={0.08}
@@ -252,6 +268,7 @@ export function TableSurface({ surface }: TableSurfaceProps) {
           <mesh
             position={[0, 0.061, 0]}
             rotation={[-Math.PI / 2, 0, 0]}
+            receiveShadow
             raycast={noopRaycast}
           >
             <ringGeometry args={[1.48, 1.505, 64]} />
@@ -272,8 +289,8 @@ export function TableSurface({ surface }: TableSurfaceProps) {
             <cylinderGeometry args={[2.05, 2.09, 0.06, 56]} />
             <meshStandardMaterial
               map={bamboo.map}
-              bumpMap={bamboo.bumpMap}
-              bumpScale={0.026}
+              normalMap={bamboo.normalMap}
+              normalScale={BAMBOO_NORMAL_SCALE}
               roughnessMap={bamboo.roughnessMap}
               roughness={0.78}
               metalness={0.02}
@@ -290,8 +307,8 @@ export function TableSurface({ surface }: TableSurfaceProps) {
             <torusGeometry args={[2.06, 0.042, 12, 64]} />
             <meshStandardMaterial
               map={bamboo.map}
-              bumpMap={bamboo.bumpMap}
-              bumpScale={0.02}
+              normalMap={bamboo.normalMap}
+              normalScale={RATTAN_NORMAL_SCALE}
               roughness={0.72}
               color="#9E703E"
             />
