@@ -74,24 +74,26 @@ export function AboutStanleyModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="about-stanley-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#1C1917]/38 p-3 sm:p-6 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex h-[100dvh] items-center justify-center overflow-hidden bg-[#1C1917]/38 px-3 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col overflow-hidden rounded-[28px] border border-[#E6DDD0] bg-[#FAF7F2] text-[#1C1917] shadow-[0_28px_80px_-20px_rgba(28,25,23,0.38)]"
+        className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-[28px] border border-[#E6DDD0] bg-[#FAF7F2] text-[#1C1917] shadow-[0_28px_80px_-20px_rgba(28,25,23,0.38)] sm:max-h-[88dvh]"
         onClick={(event) => event.stopPropagation()}
       >
         {/* Cookbook Dust-Jacket Header */}
-        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[#E6DDD0] bg-[#FFFDF9] px-5 py-5 sm:px-7">
-          <div className="flex items-center gap-3.5">
-            <Image
-              src="/stanley-avatar.jpg"
-              alt="Stanley Yang"
-              width={48}
-              height={48}
-              className="h-12 w-12 shrink-0 rounded-full object-cover object-[56%_22%] ring-2 ring-[#E6DDD0] shadow-sm"
-            />
-            <div>
+        <header className="flex shrink-0 items-start justify-between gap-4 border-b border-[#E6DDD0] bg-[#FFFDF9] px-4 py-4 sm:px-7 sm:py-5">
+          <div className="flex min-w-0 items-center gap-3.5">
+            <div className="relative h-12 w-12 shrink-0 overflow-hidden rounded-full ring-2 ring-[#E6DDD0] shadow-sm">
+              <Image
+                src="/stanley-avatar.jpg"
+                alt="Stanley Yang"
+                width={48}
+                height={48}
+                className="h-full w-full object-cover object-[56%_22%]"
+              />
+            </div>
+            <div className="min-w-0">
               <div className="flex items-center gap-2">
                 <Image
                   src="/logo-mark.png"
@@ -124,7 +126,7 @@ export function AboutStanleyModal({
         </header>
 
         {/* Dust-Jacket Body */}
-        <div className="flex-1 space-y-6 overflow-y-auto px-5 py-6 sm:px-7">
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-4 py-5 sm:px-7 sm:py-6">
           {/* Personal Note */}
           <section className="rounded-2xl border border-[#E6DDD0] border-l-4 border-l-[#D9381E] bg-[#FFFDF9] p-5">
             <p className="font-serif text-[17px] sm:text-[18px] leading-[1.6] text-[#1C1917]">

@@ -68,11 +68,11 @@ export function TastingMenuModal({
       role="dialog"
       aria-modal="true"
       aria-labelledby="tasting-menu-title"
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[#1C1917]/38 p-3 sm:p-6 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex h-[100dvh] items-center justify-center overflow-hidden bg-[#1C1917]/38 px-3 pt-[max(1rem,env(safe-area-inset-top))] pb-[max(1rem,env(safe-area-inset-bottom))] sm:p-6 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="flex max-h-[90vh] w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-[#E6DDD0] bg-[#FAF7F2] text-[#1C1917] shadow-[0_28px_80px_-20px_rgba(28,25,23,0.38)]"
+        className="flex max-h-full w-full max-w-4xl flex-col overflow-hidden rounded-[28px] border border-[#E6DDD0] bg-[#FAF7F2] text-[#1C1917] shadow-[0_28px_80px_-20px_rgba(28,25,23,0.38)] sm:max-h-[88dvh]"
         onClick={(event) => event.stopPropagation()}
       >
         {/* Editorial Tasting Menu Header */}
@@ -123,7 +123,7 @@ export function TastingMenuModal({
         </header>
 
         {/* Responsive 7-Course Grid */}
-        <div className="flex-1 overflow-y-auto p-4 sm:p-6">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-4 sm:p-6">
           <div className="grid grid-cols-1 gap-3.5 md:grid-cols-2">
             {dishes.map((dish, idx) => {
               const isActive = dish.id === activeDishId;

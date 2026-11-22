@@ -514,10 +514,10 @@ export function CookModeModal({
       role="dialog"
       aria-modal="true"
       aria-label={`Cook Mode for ${dish.name}`}
-      className="fixed inset-0 z-50 flex flex-col bg-[#FAF7F2] text-[#1C1917]"
+      className="fixed inset-0 z-50 flex h-[100dvh] flex-col overflow-hidden bg-[#FAF7F2] pt-[env(safe-area-inset-top)] text-[#1C1917]"
     >
       {/* Top Progress Track */}
-      <div className="h-1.5 w-full bg-[#EFE8DC]">
+      <div className="h-1.5 w-full shrink-0 bg-[#EFE8DC]">
         <div
           className="h-full bg-[#D9381E] transition-all duration-300 ease-out"
           style={{ width: `${progressPercent}%` }}
@@ -691,8 +691,8 @@ export function CookModeModal({
       {/* Main Content + Optional Ingredients Drawer */}
       <div className="relative flex min-h-0 flex-1 overflow-hidden">
         {/* Giant Counter-Readable Step Canvas */}
-        <main className="flex flex-1 flex-col items-center justify-center overflow-y-auto px-5 py-8 sm:px-10 lg:px-16">
-          <div className="w-full max-w-3xl space-y-7">
+        <main className="flex min-h-0 flex-1 flex-col items-center overflow-y-auto overscroll-contain px-5 py-8 sm:px-10 lg:px-16">
+          <div className="my-auto w-full max-w-3xl space-y-7">
             {/* Step Number Pill & Clickable Step Dots */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <span className="inline-flex items-center gap-2 rounded-full border border-[#F0D5C8] bg-[#FFF5F0] px-3.5 py-1 font-mono text-xs font-semibold uppercase tracking-[0.12em] text-[#D9381E]">
@@ -851,7 +851,7 @@ export function CookModeModal({
                 </div>
               )}
 
-              <ul className="flex-1 space-y-1 overflow-y-auto px-4 py-4">
+              <ul className="min-h-0 flex-1 space-y-1 overflow-y-auto overscroll-contain px-4 py-4">
                 {dish.ingredients.map((ingredient) => {
                   const isChecked = Boolean(checkedMap[ingredient.id]);
                   const amountText = formatCulinaryAmount(ingredient.amount, scale);
