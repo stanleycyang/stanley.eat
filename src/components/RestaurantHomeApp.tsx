@@ -29,10 +29,11 @@ import {
   RESTAURANTS,
   RESTAURANT_CITIES,
   RESTAURANT_CUISINES,
+  RESTAURANT_REGIONS,
   getRestaurantById,
 } from '@/data/restaurants';
 import { RECIPES, RECIPE_MAP, getDishById } from '@/data/recipes';
-import type { BayRegion, RestaurantSpot, SpotTier } from '@/types/restaurant';
+import type { MetroRegion, RestaurantSpot, SpotTier } from '@/types/restaurant';
 import { InteractiveFoodMapLoader } from './InteractiveFoodMapLoader';
 import { RestaurantSpotModal } from './RestaurantSpotModal';
 import { AboutStanleyModal } from './AboutStanleyModal';
@@ -41,10 +42,21 @@ export interface RestaurantHomeAppProps {
   initialSpotId?: string;
 }
 
-type RegionFilter = 'all' | BayRegion;
+type RegionFilter = 'all' | MetroRegion;
 type CompanionListMode = 'ranked' | 'timeline';
 
-const REGIONS: readonly BayRegion[] = ['South Bay', 'Peninsula', 'San Francisco'];
+const MOBILE_REGION_SHORT: Record<MetroRegion, string> = {
+  'Bay Area': 'Bay Area',
+  'Los Angeles': 'LA',
+  Austin: 'Austin',
+  'New York': 'NYC',
+  Seattle: 'Seattle',
+  Chicago: 'Chicago',
+};
+
+function formatCityState(spot: RestaurantSpot): string {
+  return spot.state ? `${spot.city}, ${spot.state}` : spot.city;
+}
 
 const MONTH_NAMES = [
   'January',
@@ -76,11 +88,10 @@ const TIER_STYLES: Record<SpotTier, { label: string; className: string }> = {
   },
 };
 
-function isBayRegion(value: string | null): value is BayRegion {
+function isMetroRegion(value: string | null): value is MetroRegion {
   return (
-    value === 'South Bay' ||
-    value === 'Peninsula' ||
-    value === 'San Francisco'
+    value !== null &&
+    (RESTAURANT_REGIONS as readonly string[]).includes(value)
   );
 }
 
@@ -133,7 +144,7 @@ export function RestaurantHomeApp({
   const initialCuisineParam = searchParams.get('cuisine');
 
   const [selectedRegion, setSelectedRegion] = useState<RegionFilter>(
-    isBayRegion(initialRegionParam) ? initialRegionParam : 'all'
+    isMetroRegion(initialRegionParam) ? initialRegionParam : 'all'
   );
   const [selectedCity, setSelectedCity] = useState<string>(
     initialCityParam && RESTAURANT_CITIES.includes(initialCityParam)
@@ -321,6 +332,7 @@ export function RestaurantHomeApp({
           spot.name,
           spot.cuisine,
           spot.city,
+          spot.state ?? '',
           spot.neighborhood ?? '',
           spot.region,
           spot.stanleysNote,
@@ -508,7 +520,7 @@ export function RestaurantHomeApp({
       try {
         await navigator.share({
           title: "Stanley's Eating Map — stanley.eat",
-          text: "Exploring Stanley Yang's favorite Bay Area restaurants on stanley.eat",
+          text: "Exploring Stanley Yang's favorite restaurants across the US on stanley.eat",
           url: runtimeUrl,
         });
         return;
@@ -540,7 +552,7 @@ export function RestaurantHomeApp({
       if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
         try {
           await navigator.share({
-            title: `${spot.name} (${spot.city}) — stanley.eat`,
+            title: `${spot.name} (${formatCityState(spot)}) — stanley.eat`,
             text: `${spot.rating.toFixed(1)}/10 · Order: ${spot.mustOrder
               .slice(0, 2)
               .join(', ')}`,
@@ -559,7 +571,7 @@ export function RestaurantHomeApp({
   const mapXShareHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
     selectedRegion !== 'all'
       ? `Stanley Yang's favorite ${selectedRegion} restaurants on stanley.eat (@stanleycyang)`
-      : `Exploring Stanley Yang's interactive Bay Area eating map on stanley.eat (@stanleycyang)`
+      : `Exploring Stanley Yang's interactive US eating map on stanley.eat (@stanleycyang)`
   )}&url=${encodeURIComponent(canonicalMapShareUrl)}`;
   const mapLinkedInHref = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
     canonicalMapShareUrl
@@ -662,8 +674,7 @@ export function RestaurantHomeApp({
             No spots match those filters
           </p>
           <p className="max-w-xs text-xs leading-relaxed text-[#6B6258]">
-            Reset filters to see all {RESTAURANTS.length} favorite Bay Area spots on the
-            map.
+            Reset filters to see all {RESTAURANTS.length} favorite US spots on the map.
           </p>
           <button
             type="button"
@@ -722,7 +733,7 @@ export function RestaurantHomeApp({
                             <span className="font-semibold text-[#D9381E]">
                               {formatDayShort(spot.visitedDateISO)}
                             </span>{' '}
-                            · {spot.visitCount}× visited · {spot.city}
+                            · {spot.visitCount}× visited · {formatCityState(spot)}
                           </p>
                           <p className="mt-0.5 truncate font-serif text-[16.5px] font-semibold text-[#1C1917] group-hover:text-[#D9381E] transition-colors">
                             {spot.name}
@@ -779,7 +790,7 @@ export function RestaurantHomeApp({
                         {tierMeta.label}
                       </span>
                       <span className="font-mono text-[10.5px] text-[#786E63]">
-                        {spot.city} · {spot.price}
+                        {formatCityState(spot)} · {spot.price}
                       </span>
                     </div>
                     <h3 className="truncate font-serif text-[17.5px] font-semibold leading-snug text-[#1C1917] group-hover:text-[#D9381E] transition-colors">
@@ -831,7 +842,7 @@ export function RestaurantHomeApp({
     )}`;
     const canonicalSpotUrl = `https://www.stanley.eat/spot/${spot.id}`;
     const spotXHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
-      `${spot.name} (${spot.city}) — ${spot.rating.toFixed(1)}/10 on stanley.eat by @stanleycyang`
+      `${spot.name} (${formatCityState(spot)}) — ${spot.rating.toFixed(1)}/10 on stanley.eat by @stanleycyang`
     )}&url=${encodeURIComponent(canonicalSpotUrl)}`;
     const spotLinkedInHref = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
       canonicalSpotUrl
@@ -1026,7 +1037,7 @@ export function RestaurantHomeApp({
               <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[#6B6258]">
                 <span className="inline-flex items-center gap-1 font-medium text-[#3F3A34]">
                   <MapPin className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
-                  {spot.city}
+                  {formatCityState(spot)}
                   {spot.neighborhood ? ` · ${spot.neighborhood}` : ''}
                 </span>
                 <span aria-hidden="true" className="text-[#CFC4B4]">·</span>
@@ -1163,7 +1174,7 @@ export function RestaurantHomeApp({
     <div className="relative h-[100dvh] w-full overflow-hidden bg-[#FAF7F2] text-[#1C1917] lg:flex lg:h-screen">
       {/* ==================== MAP CANVAS STAGE (100dvh Mobile / 62% Desktop) ==================== */}
       <section
-        aria-label="Stanley's interactive Bay Area food map"
+        aria-label="Stanley's interactive US food map"
         className="relative h-full w-full lg:w-[62%] lg:shrink-0"
       >
         <InteractiveFoodMapLoader
@@ -1283,10 +1294,10 @@ export function RestaurantHomeApp({
                   : 'text-[#575049] hover:bg-[#EFE8DC]/80 hover:text-[#1C1917]'
               }`}
             >
-              All ({RESTAURANTS.length})
+              All US ({RESTAURANTS.length})
             </button>
 
-            {REGIONS.map((region) => {
+            {RESTAURANT_REGIONS.map((region) => {
               const active = selectedRegion === region;
               return (
                 <button
@@ -1440,7 +1451,7 @@ export function RestaurantHomeApp({
                   : 'border-[#E6DDD0]/95 bg-[#FFFDF9]/92 text-[#575049]'
               }`}
             >
-              All ({RESTAURANTS.length})
+              All US ({RESTAURANTS.length})
             </button>
 
             <button
@@ -1455,10 +1466,9 @@ export function RestaurantHomeApp({
               ★ Essentials
             </button>
 
-            {REGIONS.map((region) => {
+            {RESTAURANT_REGIONS.map((region) => {
               const active = selectedRegion === region;
-              const shortRegion =
-                region === 'San Francisco' ? 'SF' : region;
+              const shortRegion = MOBILE_REGION_SHORT[region] ?? region;
               return (
                 <button
                   key={region}
@@ -1552,7 +1562,7 @@ export function RestaurantHomeApp({
                       </h2>
                     </div>
                     <p className="mt-1 truncate text-[12px] text-[#6B6258]">
-                      {mobilePreviewSpot.city} · {mobilePreviewSpot.cuisine} ·{' '}
+                      {formatCityState(mobilePreviewSpot)} · {mobilePreviewSpot.cuisine} ·{' '}
                       {mobilePreviewSpot.price}
                     </p>
                     <p className="mt-0.5 truncate text-[11.5px] font-medium text-[#3F3A34]">
@@ -1605,14 +1615,14 @@ export function RestaurantHomeApp({
             <div className="shrink-0 space-y-3 border-b border-[#E6DDD0] px-6 pt-5 pb-4">
               <div className="space-y-1">
                 <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[#D9381E]">
-                  Bay Area Eating Atlas
+                  US Eating Atlas
                 </p>
                 <h1 className="font-serif text-[26px] font-semibold leading-tight tracking-[-0.025em] text-[#1C1917]">
                   Stanley&apos;s Eating Map
                 </h1>
                 <p className="text-[13px] leading-relaxed text-[#6B6258]">
-                  {RESTAURANTS.length} favorite Bay Area spots — tap any pin or row to fly
-                  there.
+                  {RESTAURANTS.length} favorite spots across the US — click any metro or
+                  pin to fly there.
                 </p>
               </div>
 
@@ -1738,14 +1748,14 @@ export function RestaurantHomeApp({
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="Browse Stanley's Bay Area restaurants"
+          aria-label="Browse Stanley's favorite US restaurants"
           className="fixed inset-0 z-50 flex h-[100dvh] flex-col overflow-hidden bg-[#FAF7F2] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] lg:hidden"
         >
           <header className="shrink-0 space-y-3 border-b border-[#E6DDD0] bg-[#FFFDF9] px-4 py-4">
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#D9381E]">
-                  Bay Area Eating Atlas
+                  US Eating Atlas
                 </p>
                 <h2 className="font-serif text-xl font-semibold text-[#1C1917]">
                   Stanley&apos;s Eating Map ({filteredSpots.length})

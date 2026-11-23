@@ -26,7 +26,7 @@ const jetBrainsMono = JetBrains_Mono({
 const SITE_URL = "https://www.stanley.eat";
 const SITE_TITLE = "stanley.eat — Stanley's Favorite Restaurants & Eating Journey";
 const SITE_DESCRIPTION =
-  "Stanley Yang's eating journey across 14 favorite Bay Area restaurants — what to order, when to go, interactive map, and 7 signature dishes in 3D.";
+  "Stanley Yang's interactive US eating atlas — 29 favorite restaurants across the Bay Area, Los Angeles, Austin, New York, Seattle & Chicago, plus 7 signature dishes in 3D.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -37,9 +37,13 @@ export const metadata: Metadata = {
   keywords: [
     "stanley.eat",
     "Stanley Yang",
+    "US food atlas",
     "Bay Area restaurants",
-    "Cupertino restaurants",
-    "San Francisco food guide",
+    "Los Angeles restaurants",
+    "Austin restaurants",
+    "New York restaurants",
+    "Seattle restaurants",
+    "Chicago restaurants",
     "eating journey",
     "3D food",
     "interactive cookbook",
@@ -66,7 +70,7 @@ export const metadata: Metadata = {
         width: 1200,
         height: 630,
         type: "image/png",
-        alt: "stanley.eat — Stanley's Eating Journey: 14 Favorite Bay Area Restaurants & 7 Dishes in 3D",
+        alt: "stanley.eat — Stanley's Eating Journey: 29 Favorite US Restaurants & 7 Dishes in 3D",
       },
     ],
   },

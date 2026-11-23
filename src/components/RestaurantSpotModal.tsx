@@ -162,12 +162,18 @@ export function RestaurantSpotModal({
     }
   }, [spot, spotShareUrl]);
 
+  const spotCityState = spot
+    ? spot.state
+      ? `${spot.city}, ${spot.state}`
+      : spot.city
+    : '';
+
   const handleNativeShare = useCallback(async () => {
     if (!spot) return;
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
-          title: `${spot.name} (${spot.city}) — stanley.eat`,
+          title: `${spot.name} (${spotCityState}) — stanley.eat`,
           text: `${spot.rating.toFixed(1)}/10 · Order: ${spot.mustOrder.slice(0, 2).join(', ')}`,
           url: spotShareUrl,
         });
@@ -179,7 +185,7 @@ export function RestaurantSpotModal({
       }
     }
     await handleCopySpotLink();
-  }, [spot, spotShareUrl, handleCopySpotLink]);
+  }, [spot, spotCityState, spotShareUrl, handleCopySpotLink]);
 
   if (!isOpen || !spot) return null;
 
@@ -190,7 +196,7 @@ export function RestaurantSpotModal({
   )}`;
   const canonicalSpotUrl = `https://www.stanley.eat/spot/${spot.id}`;
   const xShareHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
-    `${spot.name} (${spot.city}) — ${spot.rating.toFixed(1)}/10 on stanley.eat by @stanleycyang`
+    `${spot.name} (${spotCityState}) — ${spot.rating.toFixed(1)}/10 on stanley.eat by @stanleycyang`
   )}&url=${encodeURIComponent(canonicalSpotUrl)}`;
   const linkedInShareHref = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
     canonicalSpotUrl
@@ -240,7 +246,7 @@ export function RestaurantSpotModal({
               <p className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs sm:text-[13px] text-[#6B6258]">
                 <span className="inline-flex items-center gap-1 font-medium text-[#3F3A34]">
                   <MapPin className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
-                  {spot.city}
+                  {spotCityState}
                   {spot.neighborhood ? ` · ${spot.neighborhood}` : ''}
                 </span>
                 <span aria-hidden="true" className="text-[#CFC4B4]">·</span>

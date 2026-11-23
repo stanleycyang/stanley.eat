@@ -2,14 +2,22 @@ import type { DishId } from './dish';
 
 export type PriceTier = '$' | '$$' | '$$$' | '$$$$';
 export type SpotTier = 'essential' | 'go-to' | 'worth-the-drive';
-export type BayRegion = 'South Bay' | 'Peninsula' | 'San Francisco';
+export type MetroRegion =
+  | 'Bay Area'
+  | 'Los Angeles'
+  | 'Austin'
+  | 'New York'
+  | 'Seattle'
+  | 'Chicago';
+export type BayRegion = MetroRegion;
 
 export interface RestaurantSpot {
   id: string;
   name: string;
   cuisine: string;
   city: string;
-  region: BayRegion;
+  state?: string;
+  region: MetroRegion;
   neighborhood?: string;
   price: PriceTier;
   tier: SpotTier;

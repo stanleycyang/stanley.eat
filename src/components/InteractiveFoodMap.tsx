@@ -15,30 +15,26 @@ export interface InteractiveFoodMapProps {
   onHoverSpot: (spotId: string | null) => void;
 }
 
-const POSITRON_STYLE_URL =
-  'https://basemaps.cartocdn.com/gl/positron-gl-style/style.json';
+const OPENFREEMAP_POSITRON_STYLE =
+  'https://tiles.openfreemap.org/styles/positron';
 
-const FALLBACK_RASTER_STYLE: StyleSpecification = {
+const FALLBACK_OSM_RASTER_STYLE: StyleSpecification = {
   version: 8,
   sources: {
-    'carto-light-raster': {
+    'osm-raster': {
       type: 'raster',
-      tiles: [
-        'https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
-        'https://b.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
-        'https://c.basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png',
-      ],
+      tiles: ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'],
       tileSize: 256,
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO',
+      attribution: '&copy; OpenStreetMap contributors',
     },
   },
   layers: [
     {
-      id: 'carto-light-raster-layer',
+      id: 'osm-raster-layer',
       type: 'raster',
-      source: 'carto-light-raster',
+      source: 'osm-raster',
       minzoom: 0,
-      maxzoom: 20,
+      maxzoom: 19,
     },
   ],
 };
@@ -169,9 +165,9 @@ export function InteractiveFoodMap({
       map.fitBounds(bounds, {
         padding: isMobile
           ? { top: 120, bottom: 185, left: 36, right: 36 }
-          : { top: 130, bottom: 64, left: 56, right: 56 },
-        maxZoom: 13.2,
-        duration: instant ? 0 : 700,
+          : { top: 100, bottom: 130, left: 48, right: 48 },
+        maxZoom: 13.0,
+        duration: instant ? 0 : 800,
       });
     },
     []
@@ -187,9 +183,9 @@ export function InteractiveFoodMap({
 
     const map = new maplibregl.Map({
       container,
-      style: POSITRON_STYLE_URL,
-      center: [-122.14, 37.5],
-      zoom: 9.6,
+      style: OPENFREEMAP_POSITRON_STYLE,
+      center: [-98.5, 38.0],
+      zoom: 3.7,
       attributionControl: { compact: true },
     });
 
@@ -206,7 +202,7 @@ export function InteractiveFoodMap({
     map.on('error', () => {
       if (!styleLoadedRef.current && !fallbackAppliedRef.current) {
         fallbackAppliedRef.current = true;
-        map.setStyle(FALLBACK_RASTER_STYLE);
+        map.setStyle(FALLBACK_OSM_RASTER_STYLE);
       }
     });
 
@@ -287,7 +283,9 @@ export function InteractiveFoodMap({
       nameSpan.textContent = spot.name;
       const citySpan = document.createElement('span');
       citySpan.className = 'text-[#786E63]';
-      citySpan.textContent = ` · ${spot.city}`;
+      citySpan.textContent = spot.state
+        ? ` · ${spot.city}, ${spot.state}`
+        : ` · ${spot.city}`;
       tooltip.appendChild(nameSpan);
       tooltip.appendChild(citySpan);
       root.appendChild(tooltip);
@@ -296,7 +294,7 @@ export function InteractiveFoodMap({
       button.type = 'button';
       button.setAttribute(
         'aria-label',
-        `${spot.name} in ${spot.city}, rated ${spot.rating.toFixed(1)} out of 10`
+        `${spot.name} in ${spot.state ? `${spot.city}, ${spot.state}` : spot.city}, rated ${spot.rating.toFixed(1)} out of 10`
       );
 
       let star: HTMLSpanElement | null = null;
@@ -383,9 +381,9 @@ export function InteractiveFoodMap({
 
     map.flyTo({
       center: [target.coordinates.lng, target.coordinates.lat],
-      zoom: Math.max(map.getZoom(), 13.6),
+      zoom: Math.max(Math.min(map.getZoom(), 14.5), 13.4),
       offset: isMobile ? [0, -36] : [0, 0],
-      duration: 750,
+      duration: 850,
       essential: true,
     });
   }, [selectedSpotId, spots]);
@@ -420,7 +418,7 @@ export function InteractiveFoodMap({
     <div className="stanley-food-map relative h-full w-full overflow-hidden bg-[#F3EDE2]">
       <div
         ref={containerRef}
-        aria-label="Interactive Bay Area food map"
+        aria-label="Interactive US food map"
         className="h-full w-full"
       />
 

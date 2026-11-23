@@ -17,7 +17,8 @@ export async function generateMetadata({
   const { id } = await params;
   const spot = getRestaurantById(id) ?? RESTAURANTS[0];
 
-  const title = `${spot.name} (${spot.city}) — stanley.eat`;
+  const cityState = spot.state ? `${spot.city}, ${spot.state}` : spot.city;
+  const title = `${spot.name} (${cityState}) — stanley.eat`;
   const description = `${spot.rating.toFixed(1)}/10 · Order: ${spot.mustOrder
     .slice(0, 2)
     .join(', ')}. ${spot.stanleysNote}`;
@@ -42,7 +43,7 @@ export async function generateMetadata({
           width: 1200,
           height: 630,
           type: 'image/png',
-          alt: `${spot.name} (${spot.city}) — Stanley's Eating Journey on stanley.eat`,
+          alt: `${spot.name} (${cityState}) — Stanley's Eating Journey on stanley.eat`,
         },
       ],
     },
@@ -87,7 +88,7 @@ export default async function SpotPage({ params }: SpotPageProps) {
     address: {
       '@type': 'PostalAddress',
       addressLocality: spot.city,
-      addressRegion: 'CA',
+      addressRegion: spot.state ?? 'CA',
       addressCountry: 'US',
     },
     geo: {

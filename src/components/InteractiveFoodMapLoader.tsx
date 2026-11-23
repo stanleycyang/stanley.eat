@@ -11,7 +11,7 @@ function MapLoadingSkeleton() {
     <div
       role="status"
       aria-live="polite"
-      aria-label="Loading Stanley's Bay Area map"
+      aria-label="Loading Stanley's eating atlas"
       className="relative flex h-full w-full flex-col items-center justify-center overflow-hidden bg-[#FAF7F2]"
       style={{
         backgroundImage:
@@ -24,10 +24,10 @@ function MapLoadingSkeleton() {
         </div>
         <div className="space-y-1">
           <p className="font-serif text-base font-medium tracking-[-0.01em] text-[#1C1917]">
-            Opening Stanley&apos;s Bay Area atlas&hellip;
+            Opening Stanley&apos;s eating atlas&hellip;
           </p>
           <p className="font-mono text-[11px] text-[#786E63]">
-            Loading interactive food map
+            Loading interactive US food map
           </p>
         </div>
       </div>
