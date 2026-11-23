@@ -2,7 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
+import { ArrowLeft } from 'lucide-react';
 import { RECIPES, getDishById } from '@/data/recipes';
 import type { DishId } from '@/types/dish';
 import { SceneStageLoader } from './SceneStageLoader';
@@ -364,13 +366,25 @@ export function StanleyEatApp({ initialDishId }: StanleyEatAppProps = {}) {
         </div>
 
         {/* Upgraded Top-Left Editorial Brand Masthead */}
-        <header className="pointer-events-none absolute top-3.5 left-3 z-20 flex flex-col items-start sm:top-5 sm:left-6">
-          <div className="flex items-center gap-1.5 sm:gap-2">
+        <header className="pointer-events-none absolute top-3.5 left-2.5 z-20 flex flex-col items-start sm:top-5 sm:left-6">
+          <div className="flex items-center gap-1 sm:gap-2">
+            <Link
+              href="/"
+              aria-label="Back to Stanley's Favorite Restaurants"
+              title="Favorite Restaurants"
+              className="pointer-events-auto inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/90 text-[#443E37] backdrop-blur-md shadow-[0_6px_18px_-8px_rgba(28,25,23,0.12)] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] hover:text-[#D9381E] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] sm:h-auto sm:w-auto sm:gap-1.5 sm:px-3 sm:py-1.5"
+            >
+              <ArrowLeft className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
+              <span className="hidden text-[11.5px] font-semibold sm:inline">
+                Restaurants
+              </span>
+            </Link>
+
             <button
               type="button"
               onClick={handleOpenMenu}
               aria-label="stanley.eat — open 7-course tasting menu"
-              className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/90 py-1 pr-2.5 pl-1.5 backdrop-blur-md shadow-[0_6px_18px_-8px_rgba(28,25,23,0.14)] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] sm:gap-2 sm:py-1 sm:pr-3.5 sm:pl-1.5"
+              className="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/90 py-1 pr-2 pl-1 backdrop-blur-md shadow-[0_6px_18px_-8px_rgba(28,25,23,0.14)] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] sm:gap-2 sm:py-1 sm:pr-3.5 sm:pl-1.5"
             >
               <Image
                 src="/logo-mark.png"
@@ -378,9 +392,9 @@ export function StanleyEatApp({ initialDishId }: StanleyEatAppProps = {}) {
                 width={28}
                 height={28}
                 priority
-                className="h-6 w-6 shrink-0 sm:h-7 sm:w-7"
+                className="h-5 w-5 shrink-0 sm:h-7 sm:w-7"
               />
-              <span className="font-serif text-[16px] sm:text-[21px] font-semibold leading-none tracking-[-0.03em] text-[#1C1917]">
+              <span className="font-serif text-[14.5px] sm:text-[20px] font-semibold leading-none tracking-[-0.03em] text-[#1C1917]">
                 stanley<span className="text-[#D9381E]">.eat</span>
               </span>
             </button>
@@ -398,9 +412,9 @@ export function StanleyEatApp({ initialDishId }: StanleyEatAppProps = {}) {
                 width={24}
                 height={24}
                 priority
-                className="h-6 w-6 shrink-0 rounded-full object-cover object-[56%_22%] ring-1 ring-[#E6DDD0]"
+                className="h-5.5 w-5.5 shrink-0 rounded-full object-cover object-[56%_22%] ring-1 ring-[#E6DDD0] sm:h-6 sm:w-6"
               />
-              <span className="hidden sm:inline">by Stanley Yang</span>
+              <span className="hidden xl:inline">by Stanley Yang</span>
             </button>
           </div>
 

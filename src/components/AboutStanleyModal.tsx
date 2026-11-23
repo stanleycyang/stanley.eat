@@ -2,23 +2,26 @@
 
 import { useEffect } from 'react';
 import Image from 'next/image';
+import Link from 'next/link';
 import {
+  ArrowRight,
   Compass,
   ExternalLink,
   Layers,
   LayoutGrid,
+  MapPin,
   Timer,
   X,
 } from 'lucide-react';
 import type { DishId, DishRecipe } from '@/types/dish';
 
 export interface AboutStanleyModalProps {
-  dishes: DishRecipe[];
-  activeDishId: DishId;
+  dishes?: DishRecipe[];
+  activeDishId?: DishId;
   isOpen: boolean;
   onClose: () => void;
-  onSelectDish: (id: DishId, direction?: 1 | -1) => void;
-  onOpenMenu: () => void;
+  onSelectDish?: (id: DishId, direction?: 1 | -1) => void;
+  onOpenMenu?: () => void;
 }
 
 const STANLEY_LINKS = [
@@ -110,7 +113,7 @@ export function AboutStanleyModal({
                 </h2>
               </div>
               <p className="mt-0.5 font-serif text-sm italic text-[#6B6258]">
-                A personal vault of my 7 favorite foods
+                Favorite restaurants &amp; 7 dishes in 3D
               </p>
             </div>
           </div>
@@ -129,18 +132,64 @@ export function AboutStanleyModal({
         <div className="min-h-0 flex-1 space-y-6 overflow-y-auto overscroll-contain px-4 py-5 sm:px-7 sm:py-6">
           {/* Personal Note */}
           <section className="rounded-2xl border border-[#E6DDD0] border-l-4 border-l-[#D9381E] bg-[#FFFDF9] p-5">
-            <p className="font-serif text-[17px] sm:text-[18px] leading-[1.6] text-[#1C1917]">
-              My name is Stanley Yang. Here are the 7 dishes I keep coming back to.
+            <p className="font-serif text-[16.5px] sm:text-[18px] leading-[1.62] text-[#1C1917]">
+              My name is Stanley Yang. Here&apos;s my eating journey — the restaurants I keep
+              going back to, and the 7 dishes I love to cook.
             </p>
           </section>
 
-          {/* How to Explore This Vault */}
+          {/* Explore Both Sections: Restaurants & 3D Recipes */}
+          <section aria-label="Explore stanley.eat" className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            <Link
+              href="/"
+              onClick={onClose}
+              className="group flex items-center justify-between gap-3 rounded-2xl border border-[#E6DDD0] bg-[#FFFDF9] p-4 transition-all hover:border-[#D9381E]/45 hover:bg-[#FFF8F5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
+            >
+              <div className="flex items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#FAF7F2] text-[#D9381E]">
+                  <MapPin className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <div>
+                  <p className="text-[14px] font-semibold text-[#1C1917] group-hover:text-[#D9381E] transition-colors">
+                    Favorite Restaurants
+                  </p>
+                  <p className="text-[12px] text-[#6B6258]">
+                    14 Bay Area spots · Map &amp; Diary
+                  </p>
+                </div>
+              </div>
+              <ArrowRight className="h-4 w-4 shrink-0 text-[#8A7E71] transition-transform group-hover:translate-x-0.5 group-hover:text-[#D9381E]" aria-hidden="true" />
+            </Link>
+
+            <Link
+              href="/dishes"
+              onClick={onClose}
+              className="group flex items-center justify-between gap-3 rounded-2xl border border-[#E6DDD0] bg-[#FFFDF9] p-4 transition-all hover:border-[#D9381E]/45 hover:bg-[#FFF8F5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
+            >
+              <div className="flex items-center gap-3">
+                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#FAF7F2] text-[#D9381E]">
+                  <Layers className="h-4 w-4" aria-hidden="true" />
+                </span>
+                <div>
+                  <p className="text-[14px] font-semibold text-[#1C1917] group-hover:text-[#D9381E] transition-colors">
+                    3D Recipes
+                  </p>
+                  <p className="text-[12px] text-[#6B6258]">
+                    7 interactive dishes &amp; Cook Mode
+                  </p>
+                </div>
+              </div>
+              <ArrowRight className="h-4 w-4 shrink-0 text-[#8A7E71] transition-transform group-hover:translate-x-0.5 group-hover:text-[#D9381E]" aria-hidden="true" />
+            </Link>
+          </section>
+
+          {/* How to Explore the 3D Vault */}
           <section aria-labelledby="explore-vault-heading" className="space-y-2.5">
             <h3
               id="explore-vault-heading"
               className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-[#786E63]"
             >
-              How to explore this vault
+              Inside the 3D Recipe Vault
             </h3>
 
             <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-3">
@@ -230,46 +279,78 @@ export function AboutStanleyModal({
             </div>
           </section>
 
-          {/* Bottom Quick-Jump 7-Dish Pill Strip */}
-          <section aria-label="Jump to a dish" className="space-y-2.5 border-t border-[#E6DDD0] pt-5">
-            <div className="flex items-center justify-between gap-2">
-              <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-[#786E63]">
-                Jump back into the vault
-              </span>
-              <button
-                type="button"
-                onClick={onOpenMenu}
-                className="inline-flex items-center gap-1 text-xs font-semibold text-[#D9381E] hover:underline cursor-pointer"
-              >
-                <LayoutGrid className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Full Tasting Menu</span>
-              </button>
-            </div>
-
-            <div className="flex flex-wrap gap-2">
-              {dishes.map((dish) => {
-                const isActive = dish.id === activeDishId;
-                return (
+          {/* Optional Quick-Jump 7-Dish Pill Strip */}
+          {dishes && dishes.length > 0 && (
+            <section
+              aria-label="Jump to a 3D dish"
+              className="space-y-2.5 border-t border-[#E6DDD0] pt-5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-[#786E63]">
+                  7 dishes in 3D
+                </span>
+                {onOpenMenu ? (
                   <button
-                    key={dish.id}
                     type="button"
-                    onClick={() => {
-                      onSelectDish(dish.id);
-                      onClose();
-                    }}
-                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
-                      isActive
-                        ? 'border-[#D9381E] bg-[#D9381E] text-[#FFFDF9] shadow-[0_4px_12px_-3px_rgba(217,56,30,0.45)]'
-                        : 'border-[#E6DDD0] bg-[#FFFDF9] text-[#3F3A34] hover:border-[#D9381E]/40 hover:bg-[#FFF5F0] hover:text-[#1C1917]'
-                    }`}
+                    onClick={onOpenMenu}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#D9381E] hover:underline cursor-pointer"
                   >
-                    <span aria-hidden="true">{dish.emoji}</span>
-                    <span>{dish.shortLabel}</span>
+                    <LayoutGrid className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>Full Tasting Menu</span>
                   </button>
-                );
-              })}
-            </div>
-          </section>
+                ) : (
+                  <Link
+                    href="/dishes"
+                    onClick={onClose}
+                    className="inline-flex items-center gap-1 text-xs font-semibold text-[#D9381E] hover:underline"
+                  >
+                    <LayoutGrid className="h-3.5 w-3.5" aria-hidden="true" />
+                    <span>Open 3D Gallery</span>
+                  </Link>
+                )}
+              </div>
+
+              <div className="flex flex-wrap gap-2">
+                {dishes.map((dish) => {
+                  const isActive = dish.id === activeDishId;
+                  const pillClasses = `inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
+                    isActive
+                      ? 'border-[#D9381E] bg-[#D9381E] text-[#FFFDF9] shadow-[0_4px_12px_-3px_rgba(217,56,30,0.45)]'
+                      : 'border-[#E6DDD0] bg-[#FFFDF9] text-[#3F3A34] hover:border-[#D9381E]/40 hover:bg-[#FFF5F0] hover:text-[#1C1917]'
+                  }`;
+
+                  if (onSelectDish) {
+                    return (
+                      <button
+                        key={dish.id}
+                        type="button"
+                        onClick={() => {
+                          onSelectDish(dish.id);
+                          onClose();
+                        }}
+                        className={pillClasses}
+                      >
+                        <span aria-hidden="true">{dish.emoji}</span>
+                        <span>{dish.shortLabel}</span>
+                      </button>
+                    );
+                  }
+
+                  return (
+                    <Link
+                      key={dish.id}
+                      href={`/dish/${dish.id}`}
+                      onClick={onClose}
+                      className={pillClasses}
+                    >
+                      <span aria-hidden="true">{dish.emoji}</span>
+                      <span>{dish.shortLabel}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            </section>
+          )}
         </div>
       </div>
     </div>

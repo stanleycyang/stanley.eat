@@ -24,9 +24,9 @@ const jetBrainsMono = JetBrains_Mono({
 });
 
 const SITE_URL = "https://www.stanley.eat";
-const SITE_TITLE = "stanley.eat — Stanley's 7 Favorite Dishes in Interactive 3D";
+const SITE_TITLE = "stanley.eat — Stanley's Favorite Restaurants & Eating Journey";
 const SITE_DESCRIPTION =
-  "Orbitable 3D plates & cookable recipes for Stanley Yang's 7 favorite dishes — spin, explode layers, and cook straight from the vault.";
+  "Stanley Yang's eating journey across 14 favorite Bay Area restaurants — what to order, when to go, interactive map, and 7 signature dishes in 3D.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -37,11 +37,12 @@ export const metadata: Metadata = {
   keywords: [
     "stanley.eat",
     "Stanley Yang",
+    "Bay Area restaurants",
+    "Cupertino restaurants",
+    "San Francisco food guide",
+    "eating journey",
     "3D food",
     "interactive cookbook",
-    "recipes",
-    "Three.js",
-    "React Three Fiber",
   ],
   alternates: {
     canonical: "/",
@@ -65,7 +66,7 @@ export const metadata: Metadata = {
         width: 1200,
         height: 630,
         type: "image/png",
-        alt: "stanley.eat — Stanley's 7 Favorite Dishes in Interactive 3D",
+        alt: "stanley.eat — Stanley's Eating Journey: 14 Favorite Bay Area Restaurants & 7 Dishes in 3D",
       },
     ],
   },
