@@ -60,9 +60,9 @@ body {
     inset 0 -1px 2px rgba(107, 98, 88, 0.12);
 }
 
-/* Warm editorial paper-map look for MapLibre GL canvas (HTML markers stay crisp & unfiltered) */
+/* Warm editorial paper-map look for MapLibre GL Positron vector tiles (HTML markers stay crisp & unfiltered) */
 .stanley-food-map .maplibregl-canvas {
-  filter: sepia(0.18) saturate(0.76) hue-rotate(-8deg) brightness(1.01) contrast(0.98);
+  filter: sepia(0.16) saturate(0.78) hue-rotate(-6deg) brightness(1.01) contrast(0.99);
 }
 
 .stanley-food-map .maplibregl-ctrl-attrib {

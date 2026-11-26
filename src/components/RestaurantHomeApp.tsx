@@ -7,17 +7,21 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import {
   ArrowLeft,
   ArrowRight,
+  Bookmark,
   Calendar,
   Check,
   ChefHat,
   ChevronLeft,
   ChevronRight,
+  Copy,
+  Dices,
   ExternalLink,
   Link2,
   List,
   Map as MapIcon,
   MapPin,
   MessageSquareShare,
+  Navigation,
   RotateCcw,
   Search,
   Share2,
@@ -29,6 +33,7 @@ import {
   RESTAURANTS,
   RESTAURANT_CITIES,
   RESTAURANT_CUISINES,
+  RESTAURANT_MAP,
   RESTAURANT_REGIONS,
   getRestaurantById,
 } from '@/data/restaurants';
@@ -45,7 +50,9 @@ export interface RestaurantHomeAppProps {
 type RegionFilter = 'all' | MetroRegion;
 type CompanionListMode = 'ranked' | 'timeline';
 
-const MOBILE_REGION_SHORT: Record<MetroRegion, string> = {
+const SAVED_STORAGE_KEY = 'stanley_eat_saved_spots_v1';
+
+const SHORT_REGION_LABELS: Record<MetroRegion, string> = {
   'Bay Area': 'Bay Area',
   'Los Angeles': 'LA',
   Austin: 'Austin',
@@ -53,10 +60,6 @@ const MOBILE_REGION_SHORT: Record<MetroRegion, string> = {
   Seattle: 'Seattle',
   Chicago: 'Chicago',
 };
-
-function formatCityState(spot: RestaurantSpot): string {
-  return spot.state ? `${spot.city}, ${spot.state}` : spot.city;
-}
 
 const MONTH_NAMES = [
   'January',
@@ -93,6 +96,36 @@ function isMetroRegion(value: string | null): value is MetroRegion {
     value !== null &&
     (RESTAURANT_REGIONS as readonly string[]).includes(value)
   );
+}
+
+function formatCityState(spot: RestaurantSpot): string {
+  return spot.state ? `${spot.city}, ${spot.state}` : spot.city;
+}
+
+function haversineMiles(
+  lat1: number,
+  lng1: number,
+  lat2: number,
+  lng2: number
+): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const R = 3958.7613;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos(toRad(lat1)) *
+      Math.cos(toRad(lat2)) *
+      Math.sin(dLng / 2) *
+      Math.sin(dLng / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return R * c;
+}
+
+function formatDistanceMiles(miles: number): string {
+  if (miles < 0.1) return '0.1 mi';
+  if (miles < 10) return `${miles.toFixed(1)} mi`;
+  return `${Math.round(miles).toLocaleString()} mi`;
 }
 
 function formatMonthHeading(isoDate: string): string {
@@ -132,6 +165,22 @@ function fallbackCopyText(text: string): boolean {
   }
 }
 
+async function copyString(text: string): Promise<boolean> {
+  if (
+    typeof navigator !== 'undefined' &&
+    navigator.clipboard &&
+    typeof navigator.clipboard.writeText === 'function'
+  ) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return fallbackCopyText(text);
+    }
+  }
+  return fallbackCopyText(text);
+}
+
 export function RestaurantHomeApp({
   initialSpotId,
 }: RestaurantHomeAppProps = {}) {
@@ -142,6 +191,7 @@ export function RestaurantHomeApp({
   const initialRegionParam = searchParams.get('region');
   const initialCityParam = searchParams.get('city');
   const initialCuisineParam = searchParams.get('cuisine');
+  const initialSavedParam = searchParams.get('saved');
 
   const [selectedRegion, setSelectedRegion] = useState<RegionFilter>(
     isMetroRegion(initialRegionParam) ? initialRegionParam : 'all'
@@ -157,8 +207,37 @@ export function RestaurantHomeApp({
       : 'all'
   );
   const [essentialsOnly, setEssentialsOnly] = useState(false);
+  const [underTwoDollarOnly, setUnderTwoDollarOnly] = useState(false);
+  const [savedOnly, setSavedOnly] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [listMode, setListMode] = useState<CompanionListMode>('ranked');
+
+  // Personal Want-to-Try Shortlist (hydrated safely in useEffect) + Shared Shortlist from ?saved=
+  const [savedIds, setSavedIds] = useState<Set<string>>(() => new Set());
+  const [sharedShortlistIds, setSharedShortlistIds] = useState<string[] | null>(
+    () => {
+      if (!initialSavedParam) return null;
+      const validIds = initialSavedParam
+        .split(',')
+        .map((id) => id.trim())
+        .filter((id) => Boolean(RESTAURANT_MAP[id]));
+      return validIds.length > 0 ? Array.from(new Set(validIds)) : null;
+    }
+  );
+
+  // Near Me Geolocation state
+  const [userLocation, setUserLocation] = useState<{
+    lat: number;
+    lng: number;
+  } | null>(null);
+  const [nearMeActive, setNearMeActive] = useState(false);
+  const [locating, setLocating] = useState(false);
+  const [geoNotice, setGeoNotice] = useState<string | null>(null);
+
+  // Tonight's Pick state
+  const [tonightPickSpotId, setTonightPickSpotId] = useState<string | null>(
+    null
+  );
 
   // Spatial map & companion panel state
   const [selectedSpotId, setSelectedSpotId] = useState<string | null>(() => {
@@ -173,11 +252,13 @@ export function RestaurantHomeApp({
   const [mobileListOpen, setMobileListOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
 
-  // Share popover states (map/list share + spot detail share)
+  // Share popover & copy feedback states
   const [activeShareMenu, setActiveShareMenu] = useState<
     'map-desktop' | 'map-mobile' | 'spot-desktop' | null
   >(null);
-  const [copiedTarget, setCopiedTarget] = useState<'map' | 'spot' | null>(null);
+  const [copiedTarget, setCopiedTarget] = useState<
+    'map' | 'spot' | 'order' | null
+  >(null);
   const [canNativeShare, setCanNativeShare] = useState(false);
 
   const mapShareDesktopRef = useRef<HTMLDivElement | null>(null);
@@ -185,6 +266,7 @@ export function RestaurantHomeApp({
   const spotShareDesktopRef = useRef<HTMLDivElement | null>(null);
   const desktopPanelScrollRef = useRef<HTMLDivElement | null>(null);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const geoTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasMountedRef = useRef(false);
 
   // Legacy redirect guard: /?dish=hot-pot -> /dish/hot-pot
@@ -196,7 +278,26 @@ export function RestaurantHomeApp({
     }
   }, [searchParams, router]);
 
-  // If landing directly on /spot/[id] on mobile, open the mobile detail modal cleanly post-hydration
+  // Hydrate saved spots safely from localStorage on client
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(SAVED_STORAGE_KEY);
+      if (raw) {
+        const parsed: unknown = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const valid = parsed.filter(
+            (id): id is string =>
+              typeof id === 'string' && Boolean(RESTAURANT_MAP[id])
+          );
+          setSavedIds(new Set(valid));
+        }
+      }
+    } catch {
+      // Ignore storage access errors
+    }
+  }, []);
+
+  // Open mobile detail modal cleanly if landing directly on /spot/[id] on mobile
   useEffect(() => {
     if (
       initialSpotId &&
@@ -217,16 +318,75 @@ export function RestaurantHomeApp({
   useEffect(() => {
     return () => {
       if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      if (geoTimerRef.current) clearTimeout(geoTimerRef.current);
     };
   }, []);
 
-  // Build shareable filter path ("/" or "/?region=...&city=...&cuisine=...")
+  const showGeoNotice = useCallback((msg: string) => {
+    setGeoNotice(msg);
+    if (geoTimerRef.current) clearTimeout(geoTimerRef.current);
+    geoTimerRef.current = setTimeout(() => setGeoNotice(null), 4200);
+  }, []);
+
+  // Toggle saved spot + persist to localStorage
+  const handleToggleSave = useCallback((spotId: string) => {
+    setSavedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(spotId)) {
+        next.delete(spotId);
+      } else {
+        next.add(spotId);
+      }
+      try {
+        window.localStorage.setItem(
+          SAVED_STORAGE_KEY,
+          JSON.stringify(Array.from(next))
+        );
+      } catch {
+        // Ignore storage write errors
+      }
+      return next;
+    });
+  }, []);
+
+  // Distance lookup in miles whenever userLocation is available
+  const distanceBySpotId = useMemo(() => {
+    const map = new Map<string, number>();
+    if (!userLocation) return map;
+    for (const spot of RESTAURANTS) {
+      map.set(
+        spot.id,
+        haversineMiles(
+          userLocation.lat,
+          userLocation.lng,
+          spot.coordinates.lat,
+          spot.coordinates.lng
+        )
+      );
+    }
+    return map;
+  }, [userLocation]);
+
+  // Build shareable filter path ("/" or "/?saved=..." or "/?region=...&cuisine=...")
   const buildFilterPath = useCallback(
-    (region: RegionFilter, city: string, cuisine: string) => {
+    (
+      region: RegionFilter,
+      city: string,
+      cuisine: string,
+      isSavedFilter: boolean,
+      currentSaved: ReadonlySet<string>,
+      sharedIds: string[] | null
+    ) => {
       const params = new URLSearchParams();
-      if (region !== 'all') params.set('region', region);
-      if (city !== 'all') params.set('city', city);
-      if (cuisine !== 'all') params.set('cuisine', cuisine);
+      if (sharedIds && sharedIds.length > 0) {
+        params.set('saved', sharedIds.join(','));
+      } else if (isSavedFilter && currentSaved.size > 0) {
+        params.set('saved', Array.from(currentSaved).join(','));
+      } else {
+        if (region !== 'all') params.set('region', region);
+        if (city !== 'all') params.set('city', city);
+        if (cuisine !== 'all') params.set('cuisine', cuisine);
+      }
       const qs = params.toString();
       return qs ? `/?${qs}` : '/';
     },
@@ -247,7 +407,10 @@ export function RestaurantHomeApp({
       const nextPath = buildFilterPath(
         selectedRegion,
         selectedCity,
-        selectedCuisine
+        selectedCuisine,
+        savedOnly,
+        savedIds,
+        sharedShortlistIds
       );
       window.history.replaceState(null, '', nextPath);
     }
@@ -256,6 +419,9 @@ export function RestaurantHomeApp({
     selectedRegion,
     selectedCity,
     selectedCuisine,
+    savedOnly,
+    savedIds,
+    sharedShortlistIds,
     buildFilterPath,
   ]);
 
@@ -311,13 +477,19 @@ export function RestaurantHomeApp({
     selectedCity !== 'all' ||
     selectedCuisine !== 'all' ||
     essentialsOnly ||
+    underTwoDollarOnly ||
+    savedOnly ||
+    Boolean(sharedShortlistIds) ||
     searchQuery.trim().length > 0;
 
-  // Filtered spots (ranked by rating, then visitCount)
+  // Filtered & sorted spots (sorts nearest-first when Near Me is active!)
   const filteredSpots = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
+    const sharedSet = sharedShortlistIds ? new Set(sharedShortlistIds) : null;
 
-    return RESTAURANTS.filter((spot) => {
+    const matched = RESTAURANTS.filter((spot) => {
+      if (sharedSet && !sharedSet.has(spot.id)) return false;
+      if (!sharedSet && savedOnly && !savedIds.has(spot.id)) return false;
       if (selectedRegion !== 'all' && spot.region !== selectedRegion) {
         return false;
       }
@@ -326,6 +498,9 @@ export function RestaurantHomeApp({
         return false;
       }
       if (essentialsOnly && spot.tier !== 'essential') return false;
+      if (underTwoDollarOnly && spot.price !== '$' && spot.price !== '$$') {
+        return false;
+      }
 
       if (q) {
         const haystack = [
@@ -346,19 +521,33 @@ export function RestaurantHomeApp({
       }
 
       return true;
-    }).sort((a, b) => {
+    });
+
+    return [...matched].sort((a, b) => {
+      if (nearMeActive && userLocation) {
+        const da = distanceBySpotId.get(a.id) ?? Number.POSITIVE_INFINITY;
+        const db = distanceBySpotId.get(b.id) ?? Number.POSITIVE_INFINITY;
+        if (da !== db) return da - db;
+      }
       if (b.rating !== a.rating) return b.rating - a.rating;
       return b.visitCount - a.visitCount;
     });
   }, [
+    sharedShortlistIds,
+    savedOnly,
+    savedIds,
     selectedRegion,
     selectedCity,
     selectedCuisine,
     essentialsOnly,
+    underTwoDollarOnly,
     searchQuery,
+    nearMeActive,
+    userLocation,
+    distanceBySpotId,
   ]);
 
-  // Month-grouped chronological Journey Log for companion list / mobile drawer
+  // Month-grouped chronological Journey Log
   const timelineGroups = useMemo(() => {
     const sorted = [...filteredSpots].sort((a, b) =>
       b.visitedDateISO.localeCompare(a.visitedDateISO)
@@ -379,13 +568,11 @@ export function RestaurantHomeApp({
     }));
   }, [filteredSpots]);
 
-  // Selected spot object (can come from RESTAURANTS even if a filter was previously narrowed)
   const selectedSpot = useMemo(
     () => (selectedSpotId ? getRestaurantById(selectedSpotId) : null),
     [selectedSpotId]
   );
 
-  // Mobile preview card defaults to the selected spot, or the first filtered spot
   const mobilePreviewSpot = useMemo(() => {
     if (selectedSpot && filteredSpots.some((s) => s.id === selectedSpot.id)) {
       return selectedSpot;
@@ -399,7 +586,7 @@ export function RestaurantHomeApp({
     return filteredSpots.findIndex((s) => s.id === targetId);
   }, [selectedSpot, mobilePreviewSpot, filteredSpots]);
 
-  // Actions
+  // Handlers
   const handleSelectSpot = useCallback((spotId: string) => {
     setSelectedSpotId(spotId);
     setHoveredSpotId(null);
@@ -411,6 +598,7 @@ export function RestaurantHomeApp({
 
   const handleBackToAllSpots = useCallback(() => {
     setSelectedSpotId(null);
+    setTonightPickSpotId(null);
     setMobileDetailOpen(false);
     setActiveShareMenu(null);
     setFitTrigger((n) => n + 1);
@@ -425,6 +613,7 @@ export function RestaurantHomeApp({
         (baseIndex + delta + filteredSpots.length) % filteredSpots.length;
       const nextSpot = filteredSpots[nextIndex];
       if (nextSpot) {
+        setTonightPickSpotId(null);
         handleSelectSpot(nextSpot.id);
       }
     },
@@ -436,59 +625,113 @@ export function RestaurantHomeApp({
     setSelectedCity('all');
     setSelectedCuisine('all');
     setEssentialsOnly(false);
+    setUnderTwoDollarOnly(false);
+    setSavedOnly(false);
+    setSharedShortlistIds(null);
+    setNearMeActive(false);
     setSearchQuery('');
     setSelectedSpotId(null);
+    setTonightPickSpotId(null);
     setFitTrigger((n) => n + 1);
   }, []);
 
   const handleToggleRegion = useCallback((region: RegionFilter) => {
+    setSharedShortlistIds(null);
     setSelectedRegion((prev) => (prev === region ? 'all' : region));
     setSelectedCity('all');
     setSelectedSpotId(null);
+    setTonightPickSpotId(null);
   }, []);
 
-  const handleToggleCuisine = useCallback((cuisine: string) => {
-    setSelectedCuisine((prev) => (prev === cuisine ? 'all' : cuisine));
+  const handleSelectRegionFromCluster = useCallback((region: MetroRegion) => {
+    setSharedShortlistIds(null);
+    setSelectedRegion(region);
+    setSelectedCity('all');
     setSelectedSpotId(null);
+    setTonightPickSpotId(null);
   }, []);
 
-  const handleToggleEssentials = useCallback(() => {
-    setEssentialsOnly((prev) => !prev);
-    setSelectedSpotId(null);
-  }, []);
+  const handleNearMe = useCallback(() => {
+    if (nearMeActive && userLocation) {
+      setNearMeActive(false);
+      return;
+    }
 
-  // Share URLs & handlers
-  const currentFilterPath = buildFilterPath(
-    selectedRegion,
-    selectedCity,
-    selectedCuisine
-  );
-  const mapShareDisplayPath =
-    currentFilterPath === '/'
-      ? 'stanley.eat'
-      : `stanley.eat${currentFilterPath}`;
-  const canonicalMapShareUrl = `https://www.stanley.eat${
-    currentFilterPath === '/' ? '' : currentFilterPath
-  }`;
+    if (
+      typeof navigator === 'undefined' ||
+      !navigator.geolocation ||
+      typeof navigator.geolocation.getCurrentPosition !== 'function'
+    ) {
+      showGeoNotice('Geolocation is not supported in this browser.');
+      return;
+    }
 
-  const copyTextWithFeedback = useCallback(
-    async (url: string, target: 'map' | 'spot') => {
-      let ok = false;
-      if (
-        typeof navigator !== 'undefined' &&
-        navigator.clipboard &&
-        typeof navigator.clipboard.writeText === 'function'
-      ) {
-        try {
-          await navigator.clipboard.writeText(url);
-          ok = true;
-        } catch {
-          ok = fallbackCopyText(url);
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const loc = {
+          lat: position.coords.latitude,
+          lng: position.coords.longitude,
+        };
+        setLocating(false);
+        setUserLocation(loc);
+        setNearMeActive(true);
+        setSharedShortlistIds(null);
+        setSelectedCity('all');
+        setSelectedSpotId(null);
+        setTonightPickSpotId(null);
+
+        // Find the closest spot and jump to its metro if within 120 miles, else show nearest across US
+        let nearestSpot = RESTAURANTS[0];
+        let minDist = Number.POSITIVE_INFINITY;
+        for (const spot of RESTAURANTS) {
+          const d = haversineMiles(
+            loc.lat,
+            loc.lng,
+            spot.coordinates.lat,
+            spot.coordinates.lng
+          );
+          if (d < minDist) {
+            minDist = d;
+            nearestSpot = spot;
+          }
         }
-      } else {
-        ok = fallbackCopyText(url);
-      }
 
+        if (minDist <= 120) {
+          setSelectedRegion(nearestSpot.region);
+        } else {
+          setSelectedRegion('all');
+          showGeoNotice(
+            `Closest spot is ${nearestSpot.name} (${formatDistanceMiles(minDist)}).`
+          );
+        }
+        setFitTrigger((n) => n + 1);
+      },
+      () => {
+        setLocating(false);
+        showGeoNotice('Location unavailable — pick a metro pill instead.');
+      },
+      { enableHighAccuracy: false, timeout: 8000, maximumAge: 300000 }
+    );
+  }, [nearMeActive, userLocation, showGeoNotice]);
+
+  const handlePickDinner = useCallback(() => {
+    if (filteredSpots.length === 0) return;
+    const candidates =
+      filteredSpots.length > 1 && selectedSpotId
+        ? filteredSpots.filter((s) => s.id !== selectedSpotId)
+        : filteredSpots;
+    const chosen = candidates[Math.floor(Math.random() * candidates.length)];
+    if (!chosen) return;
+    setTonightPickSpotId(chosen.id);
+    setMobileListOpen(false);
+    handleSelectSpot(chosen.id);
+  }, [filteredSpots, selectedSpotId, handleSelectSpot]);
+
+  // Share & copy helpers
+  const triggerCopyFeedback = useCallback(
+    async (text: string, target: 'map' | 'spot' | 'order') => {
+      const ok = await copyString(text);
       if (ok) {
         setCopiedTarget(target);
         if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
@@ -498,6 +741,22 @@ export function RestaurantHomeApp({
     []
   );
 
+  const currentFilterPath = buildFilterPath(
+    selectedRegion,
+    selectedCity,
+    selectedCuisine,
+    savedOnly,
+    savedIds,
+    sharedShortlistIds
+  );
+  const mapShareDisplayPath =
+    currentFilterPath === '/'
+      ? 'stanley.eat'
+      : `stanley.eat${currentFilterPath}`;
+  const canonicalMapShareUrl = `https://www.stanley.eat${
+    currentFilterPath === '/' ? '' : currentFilterPath
+  }`;
+
   const handleCopyMapLink = useCallback(async () => {
     const runtimeUrl =
       typeof window !== 'undefined'
@@ -505,8 +764,8 @@ export function RestaurantHomeApp({
             currentFilterPath === '/' ? '' : currentFilterPath
           }`
         : canonicalMapShareUrl;
-    await copyTextWithFeedback(runtimeUrl, 'map');
-  }, [currentFilterPath, canonicalMapShareUrl, copyTextWithFeedback]);
+    await triggerCopyFeedback(runtimeUrl, 'map');
+  }, [currentFilterPath, canonicalMapShareUrl, triggerCopyFeedback]);
 
   const handleNativeShareMap = useCallback(async () => {
     const runtimeUrl =
@@ -519,8 +778,14 @@ export function RestaurantHomeApp({
     if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
       try {
         await navigator.share({
-          title: "Stanley's Eating Map — stanley.eat",
-          text: "Exploring Stanley Yang's favorite restaurants across the US on stanley.eat",
+          title:
+            savedOnly && savedIds.size > 0
+              ? 'My stanley.eat Shortlist'
+              : "Stanley's Eating Map — stanley.eat",
+          text:
+            savedOnly && savedIds.size > 0
+              ? `Here's my shortlist of ${savedIds.size} restaurants from stanley.eat`
+              : "Exploring Stanley Yang's favorite restaurants across the US on stanley.eat",
           url: runtimeUrl,
         });
         return;
@@ -529,7 +794,13 @@ export function RestaurantHomeApp({
       }
     }
     await handleCopyMapLink();
-  }, [currentFilterPath, canonicalMapShareUrl, handleCopyMapLink]);
+  }, [
+    currentFilterPath,
+    canonicalMapShareUrl,
+    savedOnly,
+    savedIds.size,
+    handleCopyMapLink,
+  ]);
 
   const handleCopySpotLink = useCallback(
     async (spot: RestaurantSpot) => {
@@ -537,9 +808,21 @@ export function RestaurantHomeApp({
         typeof window !== 'undefined'
           ? `${window.location.origin}/spot/${spot.id}`
           : `https://www.stanley.eat/spot/${spot.id}`;
-      await copyTextWithFeedback(runtimeUrl, 'spot');
+      await triggerCopyFeedback(runtimeUrl, 'spot');
     },
-    [copyTextWithFeedback]
+    [triggerCopyFeedback]
+  );
+
+  const handleCopyOrder = useCallback(
+    async (spot: RestaurantSpot) => {
+      const orderText = `${spot.name} (${formatCityState(
+        spot
+      )}) — Stanley's order: ${spot.mustOrder.join(
+        ', '
+      )} · https://www.stanley.eat/spot/${spot.id}`;
+      await triggerCopyFeedback(orderText, 'order');
+    },
+    [triggerCopyFeedback]
   );
 
   const handleNativeShareSpot = useCallback(
@@ -569,15 +852,17 @@ export function RestaurantHomeApp({
   );
 
   const mapXShareHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
-    selectedRegion !== 'all'
-      ? `Stanley Yang's favorite ${selectedRegion} restaurants on stanley.eat (@stanleycyang)`
-      : `Exploring Stanley Yang's interactive US eating map on stanley.eat (@stanleycyang)`
+    savedOnly && savedIds.size > 0
+      ? `My restaurant shortlist (${savedIds.size} spots) from stanley.eat by @stanleycyang`
+      : selectedRegion !== 'all'
+        ? `Stanley Yang's favorite ${selectedRegion} restaurants on stanley.eat (@stanleycyang)`
+        : `Exploring Stanley Yang's interactive US eating map on stanley.eat (@stanleycyang)`
   )}&url=${encodeURIComponent(canonicalMapShareUrl)}`;
   const mapLinkedInHref = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(
     canonicalMapShareUrl
   )}`;
 
-  // Reusable Share Map popover content
+  // Share Map / Shortlist popover menu
   const renderShareMapMenu = () => (
     <div
       role="menu"
@@ -586,7 +871,9 @@ export function RestaurantHomeApp({
     >
       <div className="mb-1.5 border-b border-[#EFE8DC] px-2.5 pt-1 pb-2">
         <p className="font-serif text-[13px] font-semibold text-[#1C1917]">
-          Share Eating Map
+          {savedOnly && savedIds.size > 0
+            ? `Share Shortlist (${savedIds.size})`
+            : 'Share Eating Map'}
         </p>
         <p className="truncate font-mono text-[10.5px] text-[#8A7E71]">
           {mapShareDisplayPath}
@@ -606,7 +893,13 @@ export function RestaurantHomeApp({
             ) : (
               <Link2 className="h-3.5 w-3.5 text-[#6B6258]" aria-hidden="true" />
             )}
-            <span>{copiedTarget === 'map' ? 'Copied!' : 'Copy Map Link'}</span>
+            <span>
+              {copiedTarget === 'map'
+                ? 'Copied!'
+                : savedOnly && savedIds.size > 0
+                  ? 'Copy Shortlist Link'
+                  : 'Copy Map Link'}
+            </span>
           </span>
         </button>
 
@@ -665,16 +958,20 @@ export function RestaurantHomeApp({
     </div>
   );
 
-  // Reusable Spot List renderer (shared between desktop right panel & mobile list drawer)
+  // Reusable Spot List (shared between desktop companion panel & mobile list drawer)
   const renderSpotListContent = (onPick: (spotId: string) => void) => {
     if (filteredSpots.length === 0) {
       return (
         <div className="flex flex-col items-center justify-center gap-3 px-5 py-16 text-center">
           <p className="font-serif text-lg font-semibold text-[#1C1917]">
-            No spots match those filters
+            {savedOnly && savedIds.size === 0
+              ? 'Your Want to Try list is empty'
+              : 'No spots match those filters'}
           </p>
           <p className="max-w-xs text-xs leading-relaxed text-[#6B6258]">
-            Reset filters to see all {RESTAURANTS.length} favorite US spots on the map.
+            {savedOnly && savedIds.size === 0
+              ? 'Tap the bookmark icon on any restaurant to build your personal trip shortlist.'
+              : `Reset filters to see all ${RESTAURANTS.length} favorite US spots on the map.`}
           </p>
           <button
             type="button"
@@ -682,7 +979,7 @@ export function RestaurantHomeApp({
             className="inline-flex items-center gap-1.5 rounded-full bg-[#D9381E] px-4 py-2 text-xs font-semibold text-[#FFFDF9] hover:bg-[#C33119] cursor-pointer"
           >
             <RotateCcw className="h-3.5 w-3.5" aria-hidden="true" />
-            Reset Filters
+            Show All {RESTAURANTS.length} Spots
           </button>
         </div>
       );
@@ -706,11 +1003,21 @@ export function RestaurantHomeApp({
               <div className="space-y-2 border-l-2 border-[#E6DDD0] pl-4">
                 {group.spots.map((spot) => {
                   const isHighlighted = hoveredSpotId === spot.id;
+                  const isSaved = savedIds.has(spot.id);
+                  const dist = distanceBySpotId.get(spot.id);
+
                   return (
-                    <button
+                    <div
                       key={spot.id}
-                      type="button"
+                      role="button"
+                      tabIndex={0}
                       onClick={() => onPick(spot.id)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onPick(spot.id);
+                        }
+                      }}
                       onMouseEnter={() => setHoveredSpotId(spot.id)}
                       onMouseLeave={() => setHoveredSpotId(null)}
                       onFocus={() => setHoveredSpotId(spot.id)}
@@ -734,20 +1041,48 @@ export function RestaurantHomeApp({
                               {formatDayShort(spot.visitedDateISO)}
                             </span>{' '}
                             · {spot.visitCount}× visited · {formatCityState(spot)}
+                            {dist !== undefined ? ` · ${formatDistanceMiles(dist)}` : ''}
                           </p>
                           <p className="mt-0.5 truncate font-serif text-[16.5px] font-semibold text-[#1C1917] group-hover:text-[#D9381E] transition-colors">
                             {spot.name}
                           </p>
                         </div>
-                        <span className="shrink-0 rounded-lg border border-[#F0D5C8] bg-[#FFF5F0] px-2 py-0.5 font-mono text-[11px] font-bold text-[#D9381E]">
-                          {spot.rating.toFixed(1)}
-                        </span>
+
+                        <div className="flex shrink-0 items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleToggleSave(spot.id);
+                            }}
+                            aria-pressed={isSaved}
+                            aria-label={
+                              isSaved
+                                ? `Remove ${spot.name} from saved`
+                                : `Save ${spot.name}`
+                            }
+                            className={`flex h-7 w-7 items-center justify-center rounded-full border transition-colors cursor-pointer ${
+                              isSaved
+                                ? 'border-[#D9381E]/40 bg-[#FFF5F0] text-[#D9381E]'
+                                : 'border-transparent text-[#8A7E71] hover:border-[#E6DDD0] hover:bg-[#FFFDF9] hover:text-[#D9381E]'
+                            }`}
+                          >
+                            <Bookmark
+                              className={`h-3.5 w-3.5 ${isSaved ? 'fill-current' : ''}`}
+                              aria-hidden="true"
+                            />
+                          </button>
+
+                          <span className="rounded-lg border border-[#F0D5C8] bg-[#FFF5F0] px-2 py-0.5 font-mono text-[11px] font-bold text-[#D9381E]">
+                            {spot.rating.toFixed(1)}
+                          </span>
+                        </div>
                       </div>
 
                       <p className="mt-1.5 line-clamp-2 text-[12.5px] leading-relaxed text-[#575049]">
                         {spot.stanleysNote}
                       </p>
-                    </button>
+                    </div>
                   );
                 })}
               </div>
@@ -761,6 +1096,8 @@ export function RestaurantHomeApp({
       <ul className="space-y-2 px-4 py-3.5">
         {filteredSpots.map((spot) => {
           const isHighlighted = hoveredSpotId === spot.id;
+          const isSaved = savedIds.has(spot.id);
+          const dist = distanceBySpotId.get(spot.id);
           const relatedDish = spot.relatedDishId
             ? RECIPE_MAP[spot.relatedDishId]
             : null;
@@ -768,9 +1105,16 @@ export function RestaurantHomeApp({
 
           return (
             <li key={spot.id}>
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 onClick={() => onPick(spot.id)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    onPick(spot.id);
+                  }
+                }}
                 onMouseEnter={() => setHoveredSpotId(spot.id)}
                 onMouseLeave={() => setHoveredSpotId(null)}
                 onFocus={() => setHoveredSpotId(spot.id)}
@@ -781,7 +1125,7 @@ export function RestaurantHomeApp({
                     : 'border-[#EAE1D5] bg-[#FAF7F2]/60 hover:border-[#D9381E]/35 hover:bg-[#FFFDF9]'
                 }`}
               >
-                <div className="flex items-start justify-between gap-2.5">
+                <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0">
                     <div className="mb-1 flex flex-wrap items-center gap-1.5">
                       <span
@@ -792,21 +1136,53 @@ export function RestaurantHomeApp({
                       <span className="font-mono text-[10.5px] text-[#786E63]">
                         {formatCityState(spot)} · {spot.price}
                       </span>
+                      {dist !== undefined && (
+                        <span className="rounded-full bg-[#EFF6FF] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[#1D4ED8]">
+                          {formatDistanceMiles(dist)}
+                        </span>
+                      )}
                     </div>
                     <h3 className="truncate font-serif text-[17.5px] font-semibold leading-snug text-[#1C1917] group-hover:text-[#D9381E] transition-colors">
                       {spot.name}
                     </h3>
                   </div>
 
-                  <span
-                    className={`shrink-0 rounded-xl px-2.5 py-1 font-mono text-xs font-bold transition-colors ${
-                      isHighlighted
-                        ? 'bg-[#D9381E] text-[#FFFDF9]'
-                        : 'border border-[#F0D5C8] bg-[#FFF5F0] text-[#D9381E]'
-                    }`}
-                  >
-                    {spot.rating.toFixed(1)}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleSave(spot.id);
+                      }}
+                      aria-pressed={isSaved}
+                      aria-label={
+                        isSaved
+                          ? `Remove ${spot.name} from Want to Try`
+                          : `Save ${spot.name} to Want to Try`
+                      }
+                      title={isSaved ? 'Saved' : 'Save to Want to Try'}
+                      className={`flex h-7 w-7 items-center justify-center rounded-full border transition-colors cursor-pointer ${
+                        isSaved
+                          ? 'border-[#D9381E]/40 bg-[#FFF5F0] text-[#D9381E]'
+                          : 'border-transparent text-[#8A7E71] hover:border-[#E6DDD0] hover:bg-[#FFFDF9] hover:text-[#D9381E]'
+                      }`}
+                    >
+                      <Bookmark
+                        className={`h-3.5 w-3.5 ${isSaved ? 'fill-current' : ''}`}
+                        aria-hidden="true"
+                      />
+                    </button>
+
+                    <span
+                      className={`rounded-xl px-2.5 py-1 font-mono text-xs font-bold transition-colors ${
+                        isHighlighted
+                          ? 'bg-[#D9381E] text-[#FFFDF9]'
+                          : 'border border-[#F0D5C8] bg-[#FFF5F0] text-[#D9381E]'
+                      }`}
+                    >
+                      {spot.rating.toFixed(1)}
+                    </span>
+                  </div>
                 </div>
 
                 <p className="line-clamp-2 text-[12.5px] leading-[1.55] text-[#575049]">
@@ -819,13 +1195,13 @@ export function RestaurantHomeApp({
                   </span>
 
                   {relatedDish && (
-                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#FFF0E8] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#B8321B]">
+                    <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#F0D5C8] bg-[#FFF2EB] px-2 py-0.5 font-mono text-[10px] font-semibold text-[#B8321B]">
                       <span aria-hidden="true">{relatedDish.emoji}</span>
-                      3D
+                      <span>3D Recipe</span>
                     </span>
                   )}
                 </div>
-              </button>
+              </div>
             </li>
           );
         })}
@@ -837,8 +1213,18 @@ export function RestaurantHomeApp({
   const renderDesktopSpotDetail = (spot: RestaurantSpot) => {
     const tierMeta = TIER_STYLES[spot.tier];
     const relatedDish = spot.relatedDishId ? RECIPE_MAP[spot.relatedDishId] : null;
+    const isSaved = savedIds.has(spot.id);
+    const dist = distanceBySpotId.get(spot.id);
+    const isPick = tonightPickSpotId === spot.id;
+
+    const appleMapsUrl = `https://maps.apple.com/?q=${encodeURIComponent(
+      spot.mapsQuery
+    )}&ll=${spot.coordinates.lat},${spot.coordinates.lng}`;
     const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
       spot.mapsQuery
+    )}`;
+    const reserveUrl = `https://www.google.com/search?q=${encodeURIComponent(
+      `${spot.name} ${spot.city} reservations waitlist`
     )}`;
     const canonicalSpotUrl = `https://www.stanley.eat/spot/${spot.id}`;
     const spotXHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
@@ -850,6 +1236,24 @@ export function RestaurantHomeApp({
 
     return (
       <>
+        {/* Tonight's Pick Ribbon */}
+        {isPick && (
+          <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#C63018] bg-[#D9381E] px-5 py-2 text-[#FFFDF9]">
+            <span className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em]">
+              <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+              Tonight&apos;s Pick
+            </span>
+            <button
+              type="button"
+              onClick={handlePickDinner}
+              className="inline-flex items-center gap-1 rounded-full bg-[#FFFDF9]/18 px-2.5 py-0.5 text-[11px] font-semibold text-[#FFFDF9] hover:bg-[#FFFDF9]/28 cursor-pointer"
+            >
+              <Dices className="h-3 w-3" aria-hidden="true" />
+              Spin Again
+            </button>
+          </div>
+        )}
+
         {/* Sticky Detail Header Bar */}
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-[#E6DDD0] bg-[#FFFDF9]/95 px-5 py-3">
           <button
@@ -885,6 +1289,28 @@ export function RestaurantHomeApp({
               </div>
             )}
 
+            <button
+              type="button"
+              onClick={() => handleToggleSave(spot.id)}
+              aria-pressed={isSaved}
+              aria-label={
+                isSaved
+                  ? `Remove ${spot.name} from Want to Try`
+                  : `Save ${spot.name} to Want to Try`
+              }
+              title={isSaved ? 'Saved in Want to Try' : 'Save to Want to Try'}
+              className={`flex h-8 w-8 items-center justify-center rounded-full border transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
+                isSaved
+                  ? 'border-[#D9381E]/45 bg-[#FFF5F0] text-[#D9381E]'
+                  : 'border-[#E6DDD0] bg-[#FAF7F2] text-[#575049] hover:border-[#D9381E]/40 hover:text-[#D9381E]'
+              }`}
+            >
+              <Bookmark
+                className={`h-3.5 w-3.5 ${isSaved ? 'fill-current' : ''}`}
+                aria-hidden="true"
+              />
+            </button>
+
             <div ref={spotShareDesktopRef} className="relative">
               <button
                 type="button"
@@ -909,7 +1335,7 @@ export function RestaurantHomeApp({
                 ) : (
                   <>
                     <Share2 className="h-3.5 w-3.5 text-[#6B6258]" aria-hidden="true" />
-                    <span>Share Spot</span>
+                    <span>Share</span>
                   </>
                 )}
               </button>
@@ -1028,6 +1454,12 @@ export function RestaurantHomeApp({
                 <span className="rounded-full border border-[#E6DDD0] bg-[#FAF7F2] px-2 py-0.5 font-mono text-[10.5px] font-semibold text-[#6B6258]">
                   {spot.price}
                 </span>
+                {dist !== undefined && (
+                  <span className="inline-flex items-center gap-1 rounded-full border border-[#C9DCF5] bg-[#EFF6FF] px-2 py-0.5 font-mono text-[10.5px] font-semibold text-[#1D4ED8]">
+                    <Navigation className="h-2.5 w-2.5" aria-hidden="true" />
+                    {formatDistanceMiles(dist)} away
+                  </span>
+                )}
               </div>
 
               <h2 className="font-serif text-[28px] font-semibold leading-tight tracking-[-0.025em] text-[#1C1917]">
@@ -1071,12 +1503,37 @@ export function RestaurantHomeApp({
             </p>
           </blockquote>
 
-          {/* What to Order */}
+          {/* What to Order + 1-Tap Copy Order */}
           <section aria-label="What to order" className="space-y-2.5">
-            <h3 className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B6258]">
-              <Utensils className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
-              What to Order
-            </h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3 className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B6258]">
+                <Utensils className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
+                What to Order
+              </h3>
+
+              <button
+                type="button"
+                onClick={() => void handleCopyOrder(spot)}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
+                  copiedTarget === 'order'
+                    ? 'border-[#D9381E] bg-[#FFF5F0] text-[#D9381E]'
+                    : 'border-[#E6DDD0] bg-[#FAF7F2] text-[#575049] hover:border-[#D9381E]/40 hover:text-[#1C1917]'
+                }`}
+              >
+                {copiedTarget === 'order' ? (
+                  <>
+                    <Check className="h-3 w-3" aria-hidden="true" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3 w-3" aria-hidden="true" />
+                    <span>Copy Order</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             <ul className="space-y-2">
               {spot.mustOrder.map((dishName, idx) => (
                 <li
@@ -1119,19 +1576,40 @@ export function RestaurantHomeApp({
             </div>
           )}
 
-          {/* Open in Google Maps CTA */}
-          <a
-            href={googleMapsUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-flex w-full items-center justify-center gap-2 rounded-full border border-[#1C1917] bg-[#1C1917] px-4 py-2.5 text-[13px] font-semibold text-[#FFFDF9] transition-all hover:bg-[#332E2A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
-          >
-            <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
-            <span>Open in Google Maps</span>
-            <ExternalLink className="h-3 w-3 opacity-75" aria-hidden="true" />
-          </a>
+          {/* Action Buttons: Apple Maps + Google Maps + Reserve / Info */}
+          <div className="grid grid-cols-3 gap-2">
+            <a
+              href={appleMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-[#1C1917] bg-[#1C1917] px-3 py-2.5 text-xs font-semibold text-[#FFFDF9] transition-all hover:bg-[#332E2A]"
+            >
+              <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Apple Maps</span>
+            </a>
 
-          {/* Cook Stanley's 3D Version Bridge Card */}
+            <a
+              href={googleMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-[#E6DDD0] bg-[#FAF7F2] px-3 py-2.5 text-xs font-semibold text-[#1C1917] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFF5F0]"
+            >
+              <Navigation className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
+              <span>Google Maps</span>
+            </a>
+
+            <a
+              href={reserveUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-1 rounded-full border border-[#E6DDD0] bg-[#FAF7F2] px-3 py-2.5 text-xs font-semibold text-[#3F3A34] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFF5F0]"
+            >
+              <span>Reserve</span>
+              <ExternalLink className="h-3 w-3 opacity-70" aria-hidden="true" />
+            </a>
+          </div>
+
+          {/* Upgraded 3D Dish Bridge Card */}
           {relatedDish && (
             <Link
               href={`/dish/${relatedDish.id}`}
@@ -1145,15 +1623,15 @@ export function RestaurantHomeApp({
                   {relatedDish.emoji}
                 </span>
                 <div className="min-w-0">
-                  <p className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold uppercase tracking-[0.11em] text-[#D9381E]">
+                  <p className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#D9381E]">
                     <ChefHat className="h-3 w-3" aria-hidden="true" />
-                    Cook Stanley&apos;s 3D Version
+                    Can&apos;t make it tonight? Cook Stanley&apos;s 3D Version
                   </p>
                   <p className="truncate font-serif text-[16.5px] font-semibold text-[#1C1917] group-hover:text-[#D9381E] transition-colors">
                     {relatedDish.name}
                   </p>
                   <p className="font-mono text-[10.5px] text-[#786E63]">
-                    {relatedDish.prepTime} prep · {relatedDish.cookTime} cook
+                    {relatedDish.prepTime} prep · {relatedDish.cookTime} cook · Interactive 3D
                   </p>
                 </div>
               </div>
@@ -1170,6 +1648,13 @@ export function RestaurantHomeApp({
     );
   };
 
+  const mobilePreviewDistance = mobilePreviewSpot
+    ? distanceBySpotId.get(mobilePreviewSpot.id) ?? null
+    : null;
+  const mobilePreviewSaved = mobilePreviewSpot
+    ? savedIds.has(mobilePreviewSpot.id)
+    : false;
+
   return (
     <div className="relative h-[100dvh] w-full overflow-hidden bg-[#FAF7F2] text-[#1C1917] lg:flex lg:h-screen">
       {/* ==================== MAP CANVAS STAGE (100dvh Mobile / 62% Desktop) ==================== */}
@@ -1181,9 +1666,15 @@ export function RestaurantHomeApp({
           spots={filteredSpots}
           selectedSpotId={selectedSpotId}
           hoveredSpotId={hoveredSpotId}
+          savedIds={savedIds}
+          userLocation={userLocation}
           fitTrigger={fitTrigger}
-          onSelectSpot={handleSelectSpot}
+          onSelectSpot={(id) => {
+            setTonightPickSpotId(null);
+            handleSelectSpot(id);
+          }}
           onHoverSpot={setHoveredSpotId}
+          onSelectRegion={handleSelectRegionFromCluster}
         />
 
         {/* DESKTOP FLOATING TOP-LEFT MASTHEAD */}
@@ -1230,8 +1721,9 @@ export function RestaurantHomeApp({
           <button
             type="button"
             onClick={() => setAboutOpen(true)}
+            title="About Stanley Yang"
             aria-label="About Stanley Yang"
-            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0]/95 bg-[#FFFDF9]/90 py-1 pr-3 pl-1 text-xs font-medium text-[#3F3A34] backdrop-blur-md shadow-[0_8px_22px_-10px_rgba(28,25,23,0.14)] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] hover:text-[#1C1917] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
+            className="pointer-events-auto inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0]/95 bg-[#FFFDF9]/90 p-1 text-xs font-medium text-[#3F3A34] backdrop-blur-md shadow-[0_8px_22px_-10px_rgba(28,25,23,0.14)] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFFDF9] hover:text-[#1C1917] cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] xl:py-1 xl:pr-3 xl:pl-1"
           >
             <Image
               src="/stanley-avatar.jpg"
@@ -1241,55 +1733,69 @@ export function RestaurantHomeApp({
               priority
               className="h-6 w-6 shrink-0 rounded-full object-cover object-[56%_22%] ring-1 ring-[#E6DDD0]"
             />
-            <span>About</span>
+            <span className="hidden xl:inline">About</span>
           </button>
         </header>
 
-        {/* DESKTOP FLOATING TOP-RIGHT SHARE MAP BUTTON */}
-        <div
-          ref={mapShareDesktopRef}
-          className="absolute top-4 right-5 z-20 hidden lg:block"
-        >
+        {/* DESKTOP FLOATING TOP-RIGHT: PICK DINNER + SHARE MAP */}
+        <div className="absolute top-4 right-5 z-20 hidden items-center gap-2 lg:flex">
           <button
             type="button"
-            onClick={() =>
-              setActiveShareMenu((prev) =>
-                prev === 'map-desktop' ? null : 'map-desktop'
-              )
-            }
-            aria-expanded={activeShareMenu === 'map-desktop'}
-            aria-haspopup="menu"
-            className={`inline-flex items-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-semibold backdrop-blur-md shadow-[0_8px_22px_-10px_rgba(28,25,23,0.18)] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
-              copiedTarget === 'map' || activeShareMenu === 'map-desktop'
-                ? 'border-[#D9381E] bg-[#FFF5F0]/95 text-[#D9381E]'
-                : 'border-[#E6DDD0]/95 bg-[#FFFDF9]/92 text-[#1C1917] hover:border-[#D9381E]/40 hover:bg-[#FFFDF9]'
-            }`}
+            onClick={handlePickDinner}
+            disabled={filteredSpots.length === 0}
+            title="Pick a random spot from current map filters"
+            className="inline-flex items-center gap-1.5 rounded-full border border-[#C63018] bg-[#D9381E] px-3.5 py-2 text-xs font-semibold text-[#FFFDF9] shadow-[0_8px_22px_-8px_rgba(217,56,30,0.55)] transition-all hover:bg-[#C33119] disabled:opacity-40 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
           >
-            {copiedTarget === 'map' ? (
-              <>
-                <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                <span>Copied!</span>
-              </>
-            ) : (
-              <>
-                <Share2 className="h-3.5 w-3.5 text-[#6B6258]" aria-hidden="true" />
-                <span>Share Map</span>
-              </>
-            )}
+            <Dices className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Pick Dinner</span>
           </button>
 
-          {activeShareMenu === 'map-desktop' && renderShareMapMenu()}
+          <div ref={mapShareDesktopRef} className="relative">
+            <button
+              type="button"
+              onClick={() =>
+                setActiveShareMenu((prev) =>
+                  prev === 'map-desktop' ? null : 'map-desktop'
+                )
+              }
+              title={savedOnly && savedIds.size > 0 ? 'Share Shortlist' : 'Share Map'}
+              aria-label={savedOnly && savedIds.size > 0 ? 'Share Shortlist' : 'Share Map'}
+              aria-expanded={activeShareMenu === 'map-desktop'}
+              aria-haspopup="menu"
+              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-2 text-xs font-semibold backdrop-blur-md shadow-[0_8px_22px_-10px_rgba(28,25,23,0.18)] transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] xl:px-3.5 ${
+                copiedTarget === 'map' || activeShareMenu === 'map-desktop'
+                  ? 'border-[#D9381E] bg-[#FFF5F0]/95 text-[#D9381E]'
+                  : 'border-[#E6DDD0]/95 bg-[#FFFDF9]/92 text-[#1C1917] hover:border-[#D9381E]/40 hover:bg-[#FFFDF9]'
+              }`}
+            >
+              {copiedTarget === 'map' ? (
+                <>
+                  <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span className="hidden xl:inline">Copied!</span>
+                </>
+              ) : (
+                <>
+                  <Share2 className="h-3.5 w-3.5 text-[#6B6258]" aria-hidden="true" />
+                  <span className="hidden xl:inline">
+                    {savedOnly && savedIds.size > 0 ? 'Share Shortlist' : 'Share Map'}
+                  </span>
+                </>
+              )}
+            </button>
+
+            {activeShareMenu === 'map-desktop' && renderShareMapMenu()}
+          </div>
         </div>
 
-        {/* DESKTOP FLOATING FILTER STRIP (Directly Beneath Masthead) */}
-        <div className="pointer-events-none absolute top-[68px] right-5 left-5 z-20 hidden lg:flex">
-          <div className="pointer-events-auto flex max-w-full items-center gap-1.5 overflow-x-auto no-scrollbar rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/90 px-2 py-1.5 backdrop-blur-md shadow-[0_10px_26px_-12px_rgba(28,25,23,0.18)]">
+        {/* DESKTOP FLOATING WHERE BAR (Clean Metro Pills + Near Me — zero clutter!) */}
+        <div className="pointer-events-none absolute top-[68px] right-5 left-5 z-20 hidden flex-col items-start gap-2 lg:flex">
+          <div className="pointer-events-auto flex max-w-full items-center gap-1 overflow-x-auto no-scrollbar rounded-full border border-[#E6DDD0]/90 bg-[#FFFDF9]/92 px-1.5 py-1.5 backdrop-blur-md shadow-[0_10px_26px_-12px_rgba(28,25,23,0.18)]">
             <button
               type="button"
               onClick={handleResetFilters}
-              aria-pressed={!hasActiveFilters}
+              aria-pressed={!hasActiveFilters && !nearMeActive}
               className={`shrink-0 rounded-full px-2.5 py-1 text-[11.5px] font-semibold transition-all cursor-pointer ${
-                !hasActiveFilters
+                !hasActiveFilters && !nearMeActive
                   ? 'bg-[#1C1917] text-[#FFFDF9]'
                   : 'text-[#575049] hover:bg-[#EFE8DC]/80 hover:text-[#1C1917]'
               }`}
@@ -1311,7 +1817,7 @@ export function RestaurantHomeApp({
                       : 'text-[#575049] hover:bg-[#EFE8DC]/80 hover:text-[#1C1917]'
                   }`}
                 >
-                  {region}
+                  {SHORT_REGION_LABELS[region]}
                 </button>
               );
             })}
@@ -1320,54 +1826,43 @@ export function RestaurantHomeApp({
 
             <button
               type="button"
-              onClick={handleToggleEssentials}
-              aria-pressed={essentialsOnly}
-              className={`shrink-0 rounded-full border px-2.5 py-1 text-[11.5px] font-semibold transition-all cursor-pointer ${
-                essentialsOnly
-                  ? 'border-[#D9381E] bg-[#FFF5F0] text-[#D9381E]'
-                  : 'border-transparent text-[#575049] hover:bg-[#EFE8DC]/80 hover:text-[#1C1917]'
+              onClick={handleNearMe}
+              disabled={locating}
+              aria-pressed={nearMeActive}
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[11.5px] font-semibold transition-all cursor-pointer ${
+                nearMeActive
+                  ? 'bg-[#2563EB] text-white'
+                  : 'text-[#3F3A34] hover:bg-[#EFE8DC]/80 hover:text-[#2563EB]'
               }`}
             >
-              ★ Essentials
+              <Navigation
+                className={`h-3 w-3 ${locating ? 'animate-pulse' : ''}`}
+                aria-hidden="true"
+              />
+              <span>{locating ? 'Locating…' : 'Near Me'}</span>
             </button>
+          </div>
 
-            <span aria-hidden="true" className="mx-0.5 h-4 w-px shrink-0 bg-[#E6DDD0]" />
-
-            {RESTAURANT_CUISINES.map((cuisine) => {
-              const active = selectedCuisine === cuisine;
-              return (
-                <button
-                  key={cuisine}
-                  type="button"
-                  onClick={() => handleToggleCuisine(cuisine)}
-                  aria-pressed={active}
-                  className={`shrink-0 rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-all cursor-pointer ${
-                    active
-                      ? 'bg-[#1C1917] text-[#FFFDF9] font-semibold'
-                      : 'text-[#6B6258] hover:bg-[#EFE8DC]/80 hover:text-[#1C1917]'
-                  }`}
-                >
-                  {cuisine}
-                </button>
-              );
-            })}
-
-            {hasActiveFilters && (
+          {geoNotice && (
+            <div
+              role="status"
+              className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#E6DDD0] bg-[#FFFDF9]/95 px-3 py-1 text-[11.5px] font-medium text-[#575049] shadow-sm backdrop-blur-md"
+            >
+              <span>{geoNotice}</span>
               <button
                 type="button"
-                onClick={handleResetFilters}
-                aria-label="Reset map filters"
-                className="inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold text-[#D9381E] hover:bg-[#FFF5F0] cursor-pointer"
+                onClick={() => setGeoNotice(null)}
+                aria-label="Dismiss notice"
+                className="text-[#8A7E71] hover:text-[#1C1917] cursor-pointer"
               >
-                <RotateCcw className="h-3 w-3" aria-hidden="true" />
-                Reset
+                <X className="h-3 w-3" aria-hidden="true" />
               </button>
-            )}
-          </div>
+            </div>
+          )}
         </div>
 
-        {/* MOBILE FLOATING TOP HEADER + SINGLE-LINE FILTER STRIP */}
-        <header className="pointer-events-none absolute inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-20 flex flex-col gap-2 lg:hidden">
+        {/* MOBILE FLOATING TOP HEADER + WHERE & CRAVING BARS */}
+        <header className="pointer-events-none absolute inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-20 flex flex-col gap-1.5 lg:hidden">
           <div className="flex items-center justify-between gap-2">
             <button
               type="button"
@@ -1440,35 +1935,46 @@ export function RestaurantHomeApp({
             </div>
           </div>
 
-          {/* Mobile Single-Line Horizontal Filter Strip */}
+          {/* Mobile Row 2: Where + Near Me + Pick Dinner */}
           <div className="pointer-events-auto flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+            <button
+              type="button"
+              onClick={handleNearMe}
+              disabled={locating}
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold backdrop-blur-md shadow-xs cursor-pointer ${
+                nearMeActive
+                  ? 'border-[#2563EB] bg-[#2563EB] text-white'
+                  : 'border-[#E6DDD0]/95 bg-[#FFFDF9]/92 text-[#1C1917]'
+              }`}
+            >
+              <Navigation className="h-3 w-3" aria-hidden="true" />
+              <span>{locating ? 'Locating…' : 'Near Me'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handlePickDinner}
+              disabled={filteredSpots.length === 0}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#C63018] bg-[#D9381E] px-2.5 py-1 text-[11px] font-semibold text-[#FFFDF9] shadow-xs disabled:opacity-40 cursor-pointer"
+            >
+              <Dices className="h-3 w-3" aria-hidden="true" />
+              <span>Pick Dinner</span>
+            </button>
+
             <button
               type="button"
               onClick={handleResetFilters}
               className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold backdrop-blur-md shadow-xs cursor-pointer ${
-                !hasActiveFilters
+                !hasActiveFilters && !nearMeActive
                   ? 'border-[#1C1917] bg-[#1C1917] text-[#FFFDF9]'
                   : 'border-[#E6DDD0]/95 bg-[#FFFDF9]/92 text-[#575049]'
               }`}
             >
-              All US ({RESTAURANTS.length})
-            </button>
-
-            <button
-              type="button"
-              onClick={handleToggleEssentials}
-              className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold backdrop-blur-md shadow-xs cursor-pointer ${
-                essentialsOnly
-                  ? 'border-[#D9381E] bg-[#D9381E] text-[#FFFDF9]'
-                  : 'border-[#E6DDD0]/95 bg-[#FFFDF9]/92 text-[#575049]'
-              }`}
-            >
-              ★ Essentials
+              All US
             </button>
 
             {RESTAURANT_REGIONS.map((region) => {
               const active = selectedRegion === region;
-              const shortRegion = MOBILE_REGION_SHORT[region] ?? region;
               return (
                 <button
                   key={region}
@@ -1480,124 +1986,219 @@ export function RestaurantHomeApp({
                       : 'border-[#E6DDD0]/95 bg-[#FFFDF9]/92 text-[#575049]'
                   }`}
                 >
-                  {shortRegion}
-                </button>
-              );
-            })}
-
-            {RESTAURANT_CUISINES.map((cuisine) => {
-              const active = selectedCuisine === cuisine;
-              return (
-                <button
-                  key={cuisine}
-                  type="button"
-                  onClick={() => handleToggleCuisine(cuisine)}
-                  className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-medium backdrop-blur-md shadow-xs cursor-pointer ${
-                    active
-                      ? 'border-[#1C1917] bg-[#1C1917] text-[#FFFDF9] font-semibold'
-                      : 'border-[#E6DDD0]/95 bg-[#FFFDF9]/92 text-[#575049]'
-                  }`}
-                >
-                  {cuisine}
+                  {SHORT_REGION_LABELS[region]}
                 </button>
               );
             })}
           </div>
+
+          {/* Mobile Row 3: Compact Craving Bar */}
+          <div className="pointer-events-auto flex items-center gap-1.5 overflow-x-auto no-scrollbar pb-0.5">
+            <button
+              type="button"
+              onClick={() => setEssentialsOnly((p) => !p)}
+              className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold backdrop-blur-md shadow-xs cursor-pointer ${
+                essentialsOnly
+                  ? 'border-[#D9381E] bg-[#FFF5F0] text-[#D9381E]'
+                  : 'border-[#E6DDD0]/95 bg-[#FFFDF9]/90 text-[#575049]'
+              }`}
+            >
+              ★ Essentials
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setUnderTwoDollarOnly((p) => !p)}
+              className={`shrink-0 rounded-full border px-2.5 py-1 text-[11px] font-semibold backdrop-blur-md shadow-xs cursor-pointer ${
+                underTwoDollarOnly
+                  ? 'border-[#1C1917] bg-[#1C1917] text-[#FFFDF9]'
+                  : 'border-[#E6DDD0]/95 bg-[#FFFDF9]/90 text-[#575049]'
+              }`}
+            >
+              Under $$
+            </button>
+
+            <button
+              type="button"
+              onClick={() => {
+                setSharedShortlistIds(null);
+                setSavedOnly((p) => !p);
+              }}
+              className={`inline-flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold backdrop-blur-md shadow-xs cursor-pointer ${
+                savedOnly
+                  ? 'border-[#D9381E] bg-[#D9381E] text-[#FFFDF9]'
+                  : 'border-[#E6DDD0]/95 bg-[#FFFDF9]/90 text-[#575049]'
+              }`}
+            >
+              <Bookmark
+                className={`h-3 w-3 ${savedOnly ? 'fill-current' : ''}`}
+                aria-hidden="true"
+              />
+              <span>Saved{savedIds.size > 0 ? ` (${savedIds.size})` : ''}</span>
+            </button>
+
+            <select
+              aria-label="Filter by cuisine"
+              value={selectedCuisine}
+              onChange={(e) => {
+                setSelectedCuisine(e.target.value);
+                setSelectedSpotId(null);
+              }}
+              className="shrink-0 rounded-full border border-[#E6DDD0]/95 bg-[#FFFDF9]/92 px-2.5 py-1 text-[11px] font-semibold text-[#1C1917] shadow-xs backdrop-blur-md focus:outline-none cursor-pointer"
+            >
+              <option value="all">All Cuisines</option>
+              {RESTAURANT_CUISINES.map((cuisine) => (
+                <option key={cuisine} value={cuisine}>
+                  {cuisine}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {geoNotice && (
+            <div className="pointer-events-auto self-start rounded-full border border-[#E6DDD0] bg-[#FFFDF9]/95 px-3 py-1 text-[11px] font-medium text-[#575049] shadow-sm backdrop-blur-md">
+              {geoNotice}
+            </div>
+          )}
         </header>
 
         {/* MOBILE FLOATING BOTTOM SPOT PREVIEW CARD */}
         <div className="pointer-events-none absolute inset-x-3 bottom-[max(0.75rem,env(safe-area-inset-bottom))] z-20 lg:hidden">
-          <div className="pointer-events-auto rounded-[24px] border border-[#E6DDD0]/95 bg-[#FFFDF9]/96 p-3.5 shadow-[0_18px_44px_-12px_rgba(28,25,23,0.3)] backdrop-blur-md">
-            {mobilePreviewSpot ? (
-              <div className="space-y-2.5">
-                {/* Stepper Row + List Drawer Trigger */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5">
-                    <button
-                      type="button"
-                      onClick={() => handleStepSpot(-1)}
-                      disabled={filteredSpots.length <= 1}
-                      aria-label="Previous restaurant"
-                      className="flex h-7 w-7 items-center justify-center rounded-full border border-[#E6DDD0] bg-[#FAF7F2] text-[#3F3A34] disabled:opacity-40 cursor-pointer"
-                    >
-                      <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleStepSpot(1)}
-                      disabled={filteredSpots.length <= 1}
-                      aria-label="Next restaurant"
-                      className="flex h-7 w-7 items-center justify-center rounded-full border border-[#E6DDD0] bg-[#FAF7F2] text-[#3F3A34] disabled:opacity-40 cursor-pointer"
-                    >
-                      <ChevronRight className="h-4 w-4" aria-hidden="true" />
-                    </button>
-                    <span className="pl-1 font-mono text-[11px] font-semibold text-[#786E63]">
-                      {String(Math.max(1, activeSpotIndexInFiltered + 1)).padStart(
-                        2,
-                        '0'
-                      )}{' '}
-                      / {String(filteredSpots.length).padStart(2, '0')}
-                    </span>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setMobileListOpen(true)}
-                    className="inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0] bg-[#FAF7F2] px-3 py-1 text-[11.5px] font-semibold text-[#1C1917] cursor-pointer"
-                  >
-                    <List className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
-                    <span>List ({filteredSpots.length})</span>
-                  </button>
-                </div>
-
-                {/* Preview Card Content */}
-                <div className="flex items-center justify-between gap-3">
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="shrink-0 rounded-lg bg-[#D9381E] px-2 py-0.5 font-mono text-[11px] font-bold text-[#FFFDF9]">
-                        {mobilePreviewSpot.rating.toFixed(1)}
-                      </span>
-                      <h2 className="truncate font-serif text-[18px] font-semibold leading-tight text-[#1C1917]">
-                        {mobilePreviewSpot.name}
-                      </h2>
-                    </div>
-                    <p className="mt-1 truncate text-[12px] text-[#6B6258]">
-                      {formatCityState(mobilePreviewSpot)} · {mobilePreviewSpot.cuisine} ·{' '}
-                      {mobilePreviewSpot.price}
-                    </p>
-                    <p className="mt-0.5 truncate text-[11.5px] font-medium text-[#3F3A34]">
-                      Order: {mobilePreviewSpot.mustOrder[0]}
-                    </p>
-                  </div>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setSelectedSpotId(mobilePreviewSpot.id);
-                      setMobileDetailOpen(true);
-                    }}
-                    className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#1C1917] px-3.5 py-2 text-xs font-semibold text-[#FFFDF9] shadow-xs cursor-pointer"
-                  >
-                    <span>Details</span>
-                    <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <div className="flex items-center justify-between gap-3 py-1">
-                <p className="text-xs font-medium text-[#575049]">
-                  No spots match those filters.
-                </p>
+          <div className="pointer-events-auto overflow-hidden rounded-[24px] border border-[#E6DDD0]/95 bg-[#FFFDF9]/96 shadow-[0_18px_44px_-12px_rgba(28,25,23,0.3)] backdrop-blur-md">
+            {mobilePreviewSpot && tonightPickSpotId === mobilePreviewSpot.id && (
+              <div className="flex items-center justify-between bg-[#D9381E] px-3.5 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.11em] text-[#FFFDF9]">
+                <span className="inline-flex items-center gap-1">
+                  <Sparkles className="h-3 w-3" aria-hidden="true" />
+                  Tonight&apos;s Pick
+                </span>
                 <button
                   type="button"
-                  onClick={handleResetFilters}
-                  className="inline-flex items-center gap-1 rounded-full bg-[#D9381E] px-3 py-1.5 text-xs font-semibold text-[#FFFDF9] cursor-pointer"
+                  onClick={handlePickDinner}
+                  className="underline cursor-pointer"
                 >
-                  <RotateCcw className="h-3 w-3" aria-hidden="true" />
-                  Reset
+                  Spin Again
                 </button>
               </div>
             )}
+
+            <div className="p-3.5">
+              {mobilePreviewSpot ? (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleStepSpot(-1)}
+                        disabled={filteredSpots.length <= 1}
+                        aria-label="Previous restaurant"
+                        className="flex h-7 w-7 items-center justify-center rounded-full border border-[#E6DDD0] bg-[#FAF7F2] text-[#3F3A34] disabled:opacity-40 cursor-pointer"
+                      >
+                        <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleStepSpot(1)}
+                        disabled={filteredSpots.length <= 1}
+                        aria-label="Next restaurant"
+                        className="flex h-7 w-7 items-center justify-center rounded-full border border-[#E6DDD0] bg-[#FAF7F2] text-[#3F3A34] disabled:opacity-40 cursor-pointer"
+                      >
+                        <ChevronRight className="h-4 w-4" aria-hidden="true" />
+                      </button>
+                      <span className="pl-1 font-mono text-[11px] font-semibold text-[#786E63]">
+                        {String(Math.max(1, activeSpotIndexInFiltered + 1)).padStart(
+                          2,
+                          '0'
+                        )}{' '}
+                        / {String(filteredSpots.length).padStart(2, '0')}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleSave(mobilePreviewSpot.id)}
+                        aria-pressed={mobilePreviewSaved}
+                        aria-label={
+                          mobilePreviewSaved
+                            ? `Remove ${mobilePreviewSpot.name} from saved`
+                            : `Save ${mobilePreviewSpot.name}`
+                        }
+                        className={`flex h-7 w-7 items-center justify-center rounded-full border cursor-pointer ${
+                          mobilePreviewSaved
+                            ? 'border-[#D9381E]/45 bg-[#FFF5F0] text-[#D9381E]'
+                            : 'border-[#E6DDD0] bg-[#FAF7F2] text-[#6B6258]'
+                        }`}
+                      >
+                        <Bookmark
+                          className={`h-3.5 w-3.5 ${
+                            mobilePreviewSaved ? 'fill-current' : ''
+                          }`}
+                          aria-hidden="true"
+                        />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setMobileListOpen(true)}
+                        className="inline-flex items-center gap-1.5 rounded-full border border-[#E6DDD0] bg-[#FAF7F2] px-3 py-1 text-[11.5px] font-semibold text-[#1C1917] cursor-pointer"
+                      >
+                        <List className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
+                        <span>List ({filteredSpots.length})</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-2">
+                        <span className="shrink-0 rounded-lg bg-[#D9381E] px-2 py-0.5 font-mono text-[11px] font-bold text-[#FFFDF9]">
+                          {mobilePreviewSpot.rating.toFixed(1)}
+                        </span>
+                        <h2 className="truncate font-serif text-[18px] font-semibold leading-tight text-[#1C1917]">
+                          {mobilePreviewSpot.name}
+                        </h2>
+                      </div>
+                      <p className="mt-1 truncate text-[12px] text-[#6B6258]">
+                        {formatCityState(mobilePreviewSpot)} ·{' '}
+                        {mobilePreviewSpot.cuisine} · {mobilePreviewSpot.price}
+                        {mobilePreviewDistance !== null
+                          ? ` · ${formatDistanceMiles(mobilePreviewDistance)}`
+                          : ''}
+                      </p>
+                      <p className="mt-0.5 truncate text-[11.5px] font-medium text-[#3F3A34]">
+                        Order: {mobilePreviewSpot.mustOrder[0]}
+                      </p>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSpotId(mobilePreviewSpot.id);
+                        setMobileDetailOpen(true);
+                      }}
+                      className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#1C1917] px-3.5 py-2 text-xs font-semibold text-[#FFFDF9] shadow-xs cursor-pointer"
+                    >
+                      <span>Details</span>
+                      <ArrowRight className="h-3.5 w-3.5" aria-hidden="true" />
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-center justify-between gap-3 py-1">
+                  <p className="text-xs font-medium text-[#575049]">
+                    No spots match those filters.
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="inline-flex items-center gap-1 rounded-full bg-[#D9381E] px-3 py-1.5 text-xs font-semibold text-[#FFFDF9] cursor-pointer"
+                  >
+                    <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                    Reset
+                  </button>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </section>
@@ -1611,22 +2212,38 @@ export function RestaurantHomeApp({
           renderDesktopSpotDetail(selectedSpot)
         ) : (
           <>
-            {/* Browse Header */}
-            <div className="shrink-0 space-y-3 border-b border-[#E6DDD0] px-6 pt-5 pb-4">
+            {/* Browse Header + Craving Bar */}
+            <div className="shrink-0 space-y-3 border-b border-[#E6DDD0] px-5 pt-5 pb-4">
+              {sharedShortlistIds && (
+                <div className="flex items-center justify-between gap-2 rounded-xl border border-[#F0D5C8] bg-[#FFF6F1] px-3 py-2 text-xs">
+                  <span className="font-semibold text-[#B8321B]">
+                    Shared Shortlist ({sharedShortlistIds.length}{' '}
+                    {sharedShortlistIds.length === 1 ? 'spot' : 'spots'})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="font-mono text-[11px] font-semibold text-[#D9381E] underline cursor-pointer"
+                  >
+                    Show All {RESTAURANTS.length} Spots
+                  </button>
+                </div>
+              )}
+
               <div className="space-y-1">
                 <p className="font-mono text-[10.5px] font-semibold uppercase tracking-[0.14em] text-[#D9381E]">
                   US Eating Atlas
                 </p>
-                <h1 className="font-serif text-[26px] font-semibold leading-tight tracking-[-0.025em] text-[#1C1917]">
+                <h1 className="font-serif text-[25px] font-semibold leading-tight tracking-[-0.025em] text-[#1C1917]">
                   Stanley&apos;s Eating Map
                 </h1>
-                <p className="text-[13px] leading-relaxed text-[#6B6258]">
+                <p className="text-[12.5px] leading-relaxed text-[#6B6258]">
                   {RESTAURANTS.length} favorite spots across the US — click any metro or
                   pin to fly there.
                 </p>
               </div>
 
-              {/* Compact Search + Ranked / Journey Log Toggle */}
+              {/* Search + Ranked / Journey Log Toggle */}
               <div className="flex items-center gap-2">
                 <div className="relative flex-1">
                   <Search
@@ -1655,7 +2272,7 @@ export function RestaurantHomeApp({
 
                 <div
                   role="tablist"
-                  aria-label="List sort mode"
+                  aria-label="List view mode"
                   className="inline-flex shrink-0 items-center rounded-full border border-[#E6DDD0] bg-[#FAF7F2] p-0.5"
                 >
                   <button
@@ -1669,7 +2286,7 @@ export function RestaurantHomeApp({
                         : 'text-[#6B6258] hover:text-[#1C1917]'
                     }`}
                   >
-                    Ranked
+                    {nearMeActive ? 'Nearest' : 'Ranked'}
                   </button>
                   <button
                     type="button"
@@ -1686,11 +2303,91 @@ export function RestaurantHomeApp({
                   </button>
                 </div>
               </div>
+
+              {/* Clean Craving Filter Bar: ★ Essentials | Under $$ | Saved (N) | Cuisine <select> */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setEssentialsOnly((p) => !p)}
+                  aria-pressed={essentialsOnly}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-all cursor-pointer ${
+                    essentialsOnly
+                      ? 'border-[#D9381E] bg-[#FFF5F0] text-[#D9381E]'
+                      : 'border-[#E6DDD0] bg-[#FAF7F2] text-[#575049] hover:border-[#CFC4B4]'
+                  }`}
+                >
+                  ★ Essentials
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setUnderTwoDollarOnly((p) => !p)}
+                  aria-pressed={underTwoDollarOnly}
+                  className={`rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-all cursor-pointer ${
+                    underTwoDollarOnly
+                      ? 'border-[#1C1917] bg-[#1C1917] text-[#FFFDF9]'
+                      : 'border-[#E6DDD0] bg-[#FAF7F2] text-[#575049] hover:border-[#CFC4B4]'
+                  }`}
+                >
+                  Under $$
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSharedShortlistIds(null);
+                    setSavedOnly((p) => !p);
+                  }}
+                  aria-pressed={savedOnly}
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-all cursor-pointer ${
+                    savedOnly
+                      ? 'border-[#D9381E] bg-[#D9381E] text-[#FFFDF9]'
+                      : 'border-[#E6DDD0] bg-[#FAF7F2] text-[#575049] hover:border-[#CFC4B4]'
+                  }`}
+                >
+                  <Bookmark
+                    className={`h-3 w-3 ${savedOnly ? 'fill-current' : ''}`}
+                    aria-hidden="true"
+                  />
+                  <span>Saved{savedIds.size > 0 ? ` (${savedIds.size})` : ''}</span>
+                </button>
+
+                <select
+                  aria-label="Filter by cuisine"
+                  value={selectedCuisine}
+                  onChange={(e) => {
+                    setSelectedCuisine(e.target.value);
+                    setSelectedSpotId(null);
+                  }}
+                  className="rounded-full border border-[#E6DDD0] bg-[#FAF7F2] px-2.5 py-1 text-[11px] font-semibold text-[#1C1917] focus:border-[#D9381E]/50 focus:outline-none cursor-pointer"
+                >
+                  <option value="all">All Cuisines</option>
+                  {RESTAURANT_CUISINES.map((cuisine) => (
+                    <option key={cuisine} value={cuisine}>
+                      {cuisine}
+                    </option>
+                  ))}
+                </select>
+
+                {hasActiveFilters && (
+                  <button
+                    type="button"
+                    onClick={handleResetFilters}
+                    className="inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold text-[#D9381E] hover:bg-[#FFF5F0] cursor-pointer"
+                  >
+                    <RotateCcw className="h-3 w-3" aria-hidden="true" />
+                    Reset
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Scrollable Spot List + Minimal Colophon */}
             <div className="min-h-0 flex-1 overflow-y-auto">
-              {renderSpotListContent(handleSelectSpot)}
+              {renderSpotListContent((id) => {
+                setTonightPickSpotId(null);
+                handleSelectSpot(id);
+              })}
 
               <footer className="mx-4 mt-4 border-t border-[#E6DDD0] px-2 pt-5 pb-6">
                 <div className="flex flex-wrap items-center justify-between gap-2 text-[11.5px] text-[#6B6258]">
@@ -1752,6 +2449,21 @@ export function RestaurantHomeApp({
           className="fixed inset-0 z-50 flex h-[100dvh] flex-col overflow-hidden bg-[#FAF7F2] pt-[env(safe-area-inset-top)] pb-[env(safe-area-inset-bottom)] lg:hidden"
         >
           <header className="shrink-0 space-y-3 border-b border-[#E6DDD0] bg-[#FFFDF9] px-4 py-4">
+            {sharedShortlistIds && (
+              <div className="flex items-center justify-between gap-2 rounded-xl border border-[#F0D5C8] bg-[#FFF6F1] px-3 py-1.5 text-xs">
+                <span className="font-semibold text-[#B8321B]">
+                  Shared Shortlist ({sharedShortlistIds.length})
+                </span>
+                <button
+                  type="button"
+                  onClick={handleResetFilters}
+                  className="font-mono text-[11px] font-semibold text-[#D9381E] underline"
+                >
+                  Show All {RESTAURANTS.length}
+                </button>
+              </div>
+            )}
+
             <div className="flex items-center justify-between gap-3">
               <div>
                 <p className="font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-[#D9381E]">
@@ -1807,7 +2519,7 @@ export function RestaurantHomeApp({
                       : 'text-[#6B6258]'
                   }`}
                 >
-                  Ranked
+                  {nearMeActive ? 'Nearest' : 'Ranked'}
                 </button>
                 <button
                   type="button"
@@ -1827,6 +2539,7 @@ export function RestaurantHomeApp({
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
             {renderSpotListContent((spotId) => {
               setMobileListOpen(false);
+              setTonightPickSpotId(null);
               handleSelectSpot(spotId);
             })}
 
@@ -1884,6 +2597,16 @@ export function RestaurantHomeApp({
         onClose={() => {
           setMobileDetailOpen(false);
         }}
+        isSaved={selectedSpot ? savedIds.has(selectedSpot.id) : false}
+        onToggleSave={
+          selectedSpot ? () => handleToggleSave(selectedSpot.id) : undefined
+        }
+        distanceMiles={
+          selectedSpot ? (distanceBySpotId.get(selectedSpot.id) ?? null) : null
+        }
+        isTonightPick={
+          selectedSpot ? tonightPickSpotId === selectedSpot.id : false
+        }
       />
 
       {/* ==================== ABOUT STANLEY MODAL ==================== */}

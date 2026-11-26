@@ -4,13 +4,16 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import {
   ArrowRight,
+  Bookmark,
   Calendar,
   Check,
   ChefHat,
+  Copy,
   ExternalLink,
   Link2,
   MapPin,
   MessageSquareShare,
+  Navigation,
   Share2,
   Sparkles,
   Star,
@@ -24,12 +27,13 @@ export interface RestaurantSpotModalProps {
   spot: RestaurantSpot | null;
   isOpen: boolean;
   onClose: () => void;
+  isSaved?: boolean;
+  onToggleSave?: () => void;
+  distanceMiles?: number | null;
+  isTonightPick?: boolean;
 }
 
-const TIER_META: Record<
-  SpotTier,
-  { label: string; badgeClass: string }
-> = {
+const TIER_META: Record<SpotTier, { label: string; badgeClass: string }> = {
   essential: {
     label: '★ Essential',
     badgeClass: 'border-[#D9381E]/35 bg-[#FFF5F0] text-[#B8321B]',
@@ -43,6 +47,12 @@ const TIER_META: Record<
     badgeClass: 'border-[#DFCFAF] bg-[#FBF4E4] text-[#7A5618]',
   },
 };
+
+function formatDistanceMiles(miles: number): string {
+  if (miles < 0.1) return '0.1 mi away';
+  if (miles < 10) return `${miles.toFixed(1)} mi away`;
+  return `${Math.round(miles).toLocaleString()} mi away`;
+}
 
 function fallbackCopyText(text: string): boolean {
   try {
@@ -62,17 +72,39 @@ function fallbackCopyText(text: string): boolean {
   }
 }
 
+async function copyString(text: string): Promise<boolean> {
+  if (
+    typeof navigator !== 'undefined' &&
+    navigator.clipboard &&
+    typeof navigator.clipboard.writeText === 'function'
+  ) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      return fallbackCopyText(text);
+    }
+  }
+  return fallbackCopyText(text);
+}
+
 export function RestaurantSpotModal({
   spot,
   isOpen,
   onClose,
+  isSaved = false,
+  onToggleSave,
+  distanceMiles = null,
+  isTonightPick = false,
 }: RestaurantSpotModalProps) {
   const [shareOpen, setShareOpen] = useState(false);
-  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
+  const [copiedOrder, setCopiedOrder] = useState(false);
   const [canNativeShare, setCanNativeShare] = useState(false);
 
   const shareMenuRef = useRef<HTMLDivElement | null>(null);
-  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const linkTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const orderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     setCanNativeShare(
@@ -82,13 +114,15 @@ export function RestaurantSpotModal({
 
   useEffect(() => {
     return () => {
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+      if (linkTimerRef.current) clearTimeout(linkTimerRef.current);
+      if (orderTimerRef.current) clearTimeout(orderTimerRef.current);
     };
   }, []);
 
   useEffect(() => {
     setShareOpen(false);
-    setCopied(false);
+    setCopiedLink(false);
+    setCopiedOrder(false);
   }, [spot?.id, isOpen]);
 
   // Body scroll lock & Escape dismissal
@@ -131,6 +165,12 @@ export function RestaurantSpotModal({
     return () => document.removeEventListener('mousedown', handlePointerDown);
   }, [shareOpen]);
 
+  const spotCityState = spot
+    ? spot.state
+      ? `${spot.city}, ${spot.state}`
+      : spot.city
+    : '';
+
   const spotShareUrl = spot
     ? typeof window !== 'undefined'
       ? `${window.location.origin}/spot/${spot.id}`
@@ -139,34 +179,26 @@ export function RestaurantSpotModal({
 
   const handleCopySpotLink = useCallback(async () => {
     if (!spot) return;
-    let ok = false;
-    if (
-      typeof navigator !== 'undefined' &&
-      navigator.clipboard &&
-      typeof navigator.clipboard.writeText === 'function'
-    ) {
-      try {
-        await navigator.clipboard.writeText(spotShareUrl);
-        ok = true;
-      } catch {
-        ok = fallbackCopyText(spotShareUrl);
-      }
-    } else {
-      ok = fallbackCopyText(spotShareUrl);
-    }
-
+    const ok = await copyString(spotShareUrl);
     if (ok) {
-      setCopied(true);
-      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
-      copyTimerRef.current = setTimeout(() => setCopied(false), 2000);
+      setCopiedLink(true);
+      if (linkTimerRef.current) clearTimeout(linkTimerRef.current);
+      linkTimerRef.current = setTimeout(() => setCopiedLink(false), 2000);
     }
   }, [spot, spotShareUrl]);
 
-  const spotCityState = spot
-    ? spot.state
-      ? `${spot.city}, ${spot.state}`
-      : spot.city
-    : '';
+  const handleCopyOrder = useCallback(async () => {
+    if (!spot) return;
+    const orderText = `${spot.name} (${spotCityState}) — Stanley's order: ${spot.mustOrder.join(
+      ', '
+    )} · https://www.stanley.eat/spot/${spot.id}`;
+    const ok = await copyString(orderText);
+    if (ok) {
+      setCopiedOrder(true);
+      if (orderTimerRef.current) clearTimeout(orderTimerRef.current);
+      orderTimerRef.current = setTimeout(() => setCopiedOrder(false), 2000);
+    }
+  }, [spot, spotCityState]);
 
   const handleNativeShare = useCallback(async () => {
     if (!spot) return;
@@ -174,7 +206,9 @@ export function RestaurantSpotModal({
       try {
         await navigator.share({
           title: `${spot.name} (${spotCityState}) — stanley.eat`,
-          text: `${spot.rating.toFixed(1)}/10 · Order: ${spot.mustOrder.slice(0, 2).join(', ')}`,
+          text: `${spot.rating.toFixed(1)}/10 · Order: ${spot.mustOrder
+            .slice(0, 2)
+            .join(', ')}`,
           url: spotShareUrl,
         });
         return;
@@ -191,8 +225,14 @@ export function RestaurantSpotModal({
 
   const tierMeta = TIER_META[spot.tier];
   const relatedDish = spot.relatedDishId ? RECIPE_MAP[spot.relatedDishId] : null;
+  const appleMapsUrl = `https://maps.apple.com/?q=${encodeURIComponent(
+    spot.mapsQuery
+  )}&ll=${spot.coordinates.lat},${spot.coordinates.lng}`;
   const googleMapsUrl = `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(
     spot.mapsQuery
+  )}`;
+  const reserveUrl = `https://www.google.com/search?q=${encodeURIComponent(
+    `${spot.name} ${spot.city} reservations waitlist`
   )}`;
   const canonicalSpotUrl = `https://www.stanley.eat/spot/${spot.id}`;
   const xShareHref = `https://twitter.com/intent/tweet?text=${encodeURIComponent(
@@ -214,6 +254,14 @@ export function RestaurantSpotModal({
         className="flex max-h-full w-full max-w-2xl flex-col overflow-hidden rounded-[28px] border border-[#E6DDD0] bg-[#FAF7F2] text-[#1C1917] shadow-[0_28px_80px_-20px_rgba(28,25,23,0.4)] sm:max-h-[88dvh]"
         onClick={(event) => event.stopPropagation()}
       >
+        {/* Optional Tonight's Pick Ribbon */}
+        {isTonightPick && (
+          <div className="flex shrink-0 items-center justify-center gap-1.5 border-b border-[#F0D5C8] bg-[#D9381E] px-4 py-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-[#FFFDF9]">
+            <Sparkles className="h-3.5 w-3.5" aria-hidden="true" />
+            <span>Tonight&apos;s Pick</span>
+          </div>
+        )}
+
         {/* Editorial Spot Header */}
         <header className="flex shrink-0 items-start justify-between gap-3 border-b border-[#E6DDD0] bg-[#FFFDF9] px-4 py-4 sm:px-7 sm:py-5">
           <div className="min-w-0 space-y-2">
@@ -234,6 +282,12 @@ export function RestaurantSpotModal({
               <span className="rounded-full border border-[#E6DDD0] bg-[#FAF7F2] px-2 py-0.5 font-mono text-[10.5px] font-semibold text-[#6B6258]">
                 {spot.price}
               </span>
+              {distanceMiles !== null && (
+                <span className="inline-flex items-center gap-1 rounded-full border border-[#C9DCF5] bg-[#EFF6FF] px-2 py-0.5 font-mono text-[10.5px] font-semibold text-[#1D4ED8]">
+                  <Navigation className="h-2.5 w-2.5" aria-hidden="true" />
+                  {formatDistanceMiles(distanceMiles)}
+                </span>
+              )}
             </div>
 
             <div>
@@ -258,15 +312,39 @@ export function RestaurantSpotModal({
             </div>
           </div>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5">
+            {onToggleSave && (
+              <button
+                type="button"
+                onClick={onToggleSave}
+                aria-pressed={isSaved}
+                aria-label={
+                  isSaved
+                    ? `Remove ${spot.name} from Want to Try`
+                    : `Save ${spot.name} to Want to Try`
+                }
+                title={isSaved ? 'Saved in Want to Try' : 'Save to Want to Try'}
+                className={`flex h-9 w-9 items-center justify-center rounded-full border transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
+                  isSaved
+                    ? 'border-[#D9381E]/45 bg-[#FFF5F0] text-[#D9381E]'
+                    : 'border-[#E6DDD0] bg-[#FAF7F2] text-[#6B6258] hover:border-[#D9381E]/40 hover:text-[#D9381E]'
+                }`}
+              >
+                <Bookmark
+                  className={`h-4 w-4 ${isSaved ? 'fill-current' : ''}`}
+                  aria-hidden="true"
+                />
+              </button>
+            )}
+
             <div
               aria-label={`Rated ${spot.rating.toFixed(1)} out of 10`}
-              className="flex flex-col items-center justify-center rounded-2xl border border-[#F0D5C8] bg-[#FFF5F0] px-3 py-1.5 text-center"
+              className="flex flex-col items-center justify-center rounded-2xl border border-[#F0D5C8] bg-[#FFF5F0] px-2.5 py-1.5 text-center"
             >
-              <span className="font-mono text-lg font-bold leading-none text-[#D9381E]">
+              <span className="font-mono text-base font-bold leading-none text-[#D9381E]">
                 {spot.rating.toFixed(1)}
               </span>
-              <span className="mt-0.5 font-mono text-[9.5px] uppercase tracking-[0.08em] text-[#9E5242]">
+              <span className="mt-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-[#9E5242]">
                 / 10
               </span>
             </div>
@@ -294,15 +372,40 @@ export function RestaurantSpotModal({
             </p>
           </blockquote>
 
-          {/* What to Order */}
+          {/* What to Order + 1-Tap Copy Order */}
           <section aria-labelledby="what-to-order-heading" className="space-y-2.5">
-            <h3
-              id="what-to-order-heading"
-              className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B6258]"
-            >
-              <Utensils className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
-              What to Order
-            </h3>
+            <div className="flex items-center justify-between gap-2">
+              <h3
+                id="what-to-order-heading"
+                className="inline-flex items-center gap-1.5 font-mono text-[11px] font-semibold uppercase tracking-[0.12em] text-[#6B6258]"
+              >
+                <Utensils className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
+                What to Order
+              </h3>
+
+              <button
+                type="button"
+                onClick={() => void handleCopyOrder()}
+                className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
+                  copiedOrder
+                    ? 'border-[#D9381E] bg-[#FFF5F0] text-[#D9381E]'
+                    : 'border-[#E6DDD0] bg-[#FFFDF9] text-[#575049] hover:border-[#D9381E]/40 hover:text-[#1C1917]'
+                }`}
+              >
+                {copiedOrder ? (
+                  <>
+                    <Check className="h-3 w-3" aria-hidden="true" />
+                    <span>Copied!</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3 w-3" aria-hidden="true" />
+                    <span>Copy Order</span>
+                  </>
+                )}
+              </button>
+            </div>
+
             <ul className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {spot.mustOrder.map((dishName, idx) => (
                 <li
@@ -348,17 +451,36 @@ export function RestaurantSpotModal({
             </div>
           )}
 
-          {/* Action Bar: Google Maps + Share Spot Popover */}
-          <div className="flex flex-wrap items-center gap-2.5 pt-1">
+          {/* Action Bar: Apple Maps + Google Maps + Reserve / Info + Share */}
+          <div className="grid grid-cols-2 gap-2 pt-1 sm:flex sm:flex-wrap sm:items-center">
+            <a
+              href={appleMapsUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-[#1C1917] bg-[#1C1917] px-3.5 py-2 text-xs font-semibold text-[#FFFDF9] transition-all hover:bg-[#332E2A]"
+            >
+              <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
+              <span>Apple Maps</span>
+            </a>
+
             <a
               href={googleMapsUrl}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex flex-1 sm:flex-initial items-center justify-center gap-2 rounded-full border border-[#1C1917] bg-[#1C1917] px-4 py-2.5 text-xs sm:text-[13px] font-semibold text-[#FFFDF9] transition-all hover:bg-[#332E2A] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-[#E6DDD0] bg-[#FFFDF9] px-3.5 py-2 text-xs font-semibold text-[#1C1917] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFF8F5]"
             >
-              <MapPin className="h-3.5 w-3.5" aria-hidden="true" />
-              <span>Open in Google Maps</span>
-              <ExternalLink className="h-3 w-3 opacity-75" aria-hidden="true" />
+              <Navigation className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
+              <span>Google Maps</span>
+            </a>
+
+            <a
+              href={reserveUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center justify-center gap-1.5 rounded-full border border-[#E6DDD0] bg-[#FFFDF9] px-3.5 py-2 text-xs font-semibold text-[#3F3A34] transition-all hover:border-[#D9381E]/40 hover:bg-[#FFF8F5]"
+            >
+              <span>Reserve / Info</span>
+              <ExternalLink className="h-3 w-3 opacity-70" aria-hidden="true" />
             </a>
 
             <div ref={shareMenuRef} className="relative">
@@ -367,16 +489,16 @@ export function RestaurantSpotModal({
                 onClick={() => setShareOpen((prev) => !prev)}
                 aria-expanded={shareOpen}
                 aria-haspopup="menu"
-                className={`inline-flex items-center gap-1.5 rounded-full border px-4 py-2.5 text-xs sm:text-[13px] font-semibold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] ${
-                  copied || shareOpen
+                className={`inline-flex w-full items-center justify-center gap-1.5 rounded-full border px-3.5 py-2 text-xs font-semibold transition-all cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E] sm:w-auto ${
+                  copiedLink || shareOpen
                     ? 'border-[#D9381E] bg-[#FFF5F0] text-[#D9381E]'
                     : 'border-[#E6DDD0] bg-[#FFFDF9] text-[#1C1917] hover:border-[#D9381E]/40 hover:bg-[#FFF8F5]'
                 }`}
               >
-                {copied ? (
+                {copiedLink ? (
                   <>
                     <Check className="h-3.5 w-3.5" aria-hidden="true" />
-                    <span>Link Copied!</span>
+                    <span>Copied!</span>
                   </>
                 ) : (
                   <>
@@ -390,7 +512,7 @@ export function RestaurantSpotModal({
                 <div
                   role="menu"
                   aria-label={`Share ${spot.name}`}
-                  className="absolute bottom-full left-0 sm:left-auto sm:right-0 z-30 mb-2 w-64 rounded-2xl border border-[#E6DDD0] bg-[#FFFDF9]/98 p-2 text-[#1C1917] shadow-[0_18px_44px_-12px_rgba(28,25,23,0.28)] backdrop-blur-md"
+                  className="absolute bottom-full right-0 z-30 mb-2 w-64 rounded-2xl border border-[#E6DDD0] bg-[#FFFDF9]/98 p-2 text-[#1C1917] shadow-[0_18px_44px_-12px_rgba(28,25,23,0.28)] backdrop-blur-md"
                 >
                   <div className="mb-1.5 border-b border-[#EFE8DC] px-2.5 pt-1 pb-2">
                     <p className="truncate font-serif text-[13px] font-semibold text-[#1C1917]">
@@ -405,16 +527,16 @@ export function RestaurantSpotModal({
                     <button
                       type="button"
                       role="menuitem"
-                      onClick={handleCopySpotLink}
+                      onClick={() => void handleCopySpotLink()}
                       className="flex w-full items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-left text-xs font-medium text-[#1C1917] transition-colors hover:bg-[#FAF7F2] cursor-pointer"
                     >
                       <span className="flex items-center gap-2">
-                        {copied ? (
+                        {copiedLink ? (
                           <Check className="h-3.5 w-3.5 text-[#D9381E]" aria-hidden="true" />
                         ) : (
                           <Link2 className="h-3.5 w-3.5 text-[#6B6258]" aria-hidden="true" />
                         )}
-                        <span>{copied ? 'Copied!' : 'Copy Spot Link'}</span>
+                        <span>{copiedLink ? 'Copied!' : 'Copy Spot Link'}</span>
                       </span>
                     </button>
 
@@ -475,12 +597,12 @@ export function RestaurantSpotModal({
             </div>
           </div>
 
-          {/* Bridge to Stanley's 3D Recipe */}
+          {/* Upgraded 3D Dish Bridge */}
           {relatedDish && (
             <Link
               href={`/dish/${relatedDish.id}`}
               onClick={onClose}
-              className="group flex items-center justify-between gap-4 rounded-2xl border border-[#F0D5C8] bg-[#FFF6F1] p-4 transition-all hover:border-[#D9381E]/60 hover:bg-[#FFF1EA] hover:shadow-[0_10px_26px_-14px_rgba(217,56,30,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
+              className="group flex items-center justify-between gap-4 rounded-2xl border border-[#F0D5C8] bg-[#FFF6F1] p-4 transition-all hover:border-[#D9381E]/60 hover:bg-[#FFF0E8] hover:shadow-[0_10px_26px_-14px_rgba(217,56,30,0.3)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#D9381E]"
             >
               <div className="flex min-w-0 items-center gap-3.5">
                 <span
@@ -490,9 +612,9 @@ export function RestaurantSpotModal({
                   {relatedDish.emoji}
                 </span>
                 <div className="min-w-0">
-                  <p className="inline-flex items-center gap-1 font-mono text-[10.5px] font-semibold uppercase tracking-[0.11em] text-[#D9381E]">
+                  <p className="inline-flex items-center gap-1 font-mono text-[10px] font-semibold uppercase tracking-[0.1em] text-[#D9381E]">
                     <ChefHat className="h-3 w-3" aria-hidden="true" />
-                    Cook Stanley&apos;s 3D Version
+                    Can&apos;t make it tonight? Cook Stanley&apos;s 3D Version
                   </p>
                   <p className="truncate font-serif text-[17px] font-semibold text-[#1C1917] group-hover:text-[#D9381E] transition-colors">
                     {relatedDish.name}
